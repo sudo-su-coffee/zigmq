@@ -1,116 +1,123 @@
 # zigmq
 
-**zigmq** is a lightweight, learning-focused and edge-oriented TCP publish/subscribe broker written in Zig. It provides a deliberately small line protocol so the core ideas of networking, concurrency, topic routing, and fan-out remain easy to inspect.
+**zigmq** is a compact, learning-focused TCP publish/subscribe broker written in Zig. It is designed for small edge devices and direct local deployments where a simple in-memory broker is more useful than a large messaging stack.
 
-> zigmq is not intended to replace NATS in production. Use NATS when you need mature security, persistence, clustering, monitoring, and a large client ecosystem.
+> zigmq is intentionally smaller than NATS. It is suitable for learning, experiments, and lightweight edge workloads. Use NATS when you need mature clustering, persistence, security, monitoring, and a broad client ecosystem.
 
-## Current MVP
+## Features
 
-The broker accepts multiple TCP clients and starts one thread per connection. A client can subscribe to a topic, publish a line-oriented payload, unsubscribe, check liveness, request help, or disconnect. Every connected subscriber of a topic receives a copy of each published message.
-
-| Capability | MVP behavior |
+| Capability | Behavior |
 | --- | --- |
 | Transport | TCP over IPv4 |
 | Default address | `127.0.0.1:4222` |
-| Commands | `SUB`, `UNSUB`, `PUB`, `PING`, `PONG`, `HELP`, `QUIT` |
-| Delivery | At-most-once in-memory fan-out |
+| Custom commands | `SUB`, `UNSUB`, `PUB`, `AUTH`, `PING`, `PONG`, `HELP`, `QUIT` |
+| Wildcards | `*` matches one subject token; `>` matches the remaining suffix |
+| Delivery | In-memory at-most-once fan-out |
+| Backpressure | 32 queued messages or 256 KiB per client, then slow clients are disconnected |
+| Authentication | Optional shared token using `--auth-token` |
+| NATS mode | Small subset: `INFO`, `CONNECT`, `PUB`, `SUB`, `UNSUB`, `MSG`, `PING`, `PONG` |
 | Persistence | None |
-| Authentication | None |
-| Topic characters | Letters, numbers, `.`, `-`, `_` |
-| Maximum topic length | 256 bytes |
-| Maximum payload length | 64 KiB |
 | Zig version | 0.15.2 |
 
-## Build
+## Build and test
 
 Install Zig 0.15.2, then run:
 
 ```sh
-zig build
 zig build test
+zig build
+python3 scripts/e2e_test.py --binary ./zig-out/bin/zigmq
 ```
 
-The executable is written to `zig-out/bin/zigmq`.
+The repository also runs these checks in GitHub Actions for pushes and pull requests targeting `main`.
 
-## Run
-
-Start the broker with the defaults:
+## Run the custom protocol
 
 ```sh
 zig build run
 ```
 
-Or select an address and port:
+The server listens on `127.0.0.1:4222` by default. Configure the address and port with:
 
 ```sh
 zig build run -- --host 0.0.0.0 --port 4222
 ```
 
-The server prints a startup message and waits for TCP clients.
-
-## Protocol
-
-Each command is terminated by `CRLF` or `LF`. The payload of `PUB` is the remainder of the line after the topic, so the current MVP is intended for text payloads without embedded newlines.
+A client receives `+OK zigmq ready` when authentication is disabled. Commands are line-oriented and terminate with `CRLF` or `LF`.
 
 ```text
-SUB sensors.room1
+SUB sensors.*
 +OK SUB
 
 PUB sensors.room1 21.5 C
 +OK PUB
 
-MSG sensors.room1 8
+MSG sensors.room1 6
 21.5 C
-
-UNSUB sensors.room1
-+OK UNSUB
 
 PING
 PONG
 ```
 
-A new client receives:
+A `*` wildcard matches exactly one dot-separated token. A `>` wildcard matches the remaining suffix and must be the final token. Publishing never accepts wildcards.
+
+## Optional authentication
+
+For a small trusted edge deployment, enable a shared token:
+
+```sh
+zig build run -- --auth-token edge-secret
+```
+
+Clients must authenticate before using broker commands:
 
 ```text
-+OK zigmq ready
+AUTH edge-secret
++OK AUTH
 ```
 
-`HELP` returns the supported commands. `QUIT` returns `+OK BYE` and closes the connection. Invalid commands receive an `-ERR` response. Duplicate subscriptions are harmless and return a positive acknowledgment.
+The token is intentionally simple and is not a replacement for TLS or a full identity system. Do not expose this mode directly to an untrusted network without placing it behind an encrypted transport or trusted network boundary.
 
-## Quick manual test
+## Graceful shutdown
 
-With the server running, open two terminals. In terminal one, connect and subscribe:
+The server handles `SIGINT` and `SIGTERM`. It stops accepting new clients, wakes active connections, joins client threads, releases queued messages, and exits cleanly. This makes it suitable for a small service manager or container lifecycle.
+
+## NATS-compatible subset
+
+Run the compact NATS mode with:
 
 ```sh
-telnet 127.0.0.1 4222
-SUB demo
+zig build run -- --protocol nats
 ```
 
-In terminal two, connect and publish:
+The server sends an `INFO` frame and accepts a deliberately small subset of the NATS client protocol: `CONNECT`, `PUB`, `SUB`, `UNSUB`, `MSG`, `PING`, and `PONG`. NATS payloads use the normal byte-count form, for example:
 
-```sh
-telnet 127.0.0.1 4222
-PUB demo hello from zigmq
+```text
+SUB sensors.* 1\r\n
+PUB sensors.room1 5\r\n
+hello\r\n
+MSG sensors.room1 1 5\r\n
+hello\r\n
 ```
 
-The first terminal receives a `MSG demo ...` frame containing the payload.
+Queue groups, headers, request/reply routing, JetStream, clustering, and the rest of the NATS protocol are not implemented. The custom protocol remains the simplest option for direct edge use.
+
+## Limits and delivery model
+
+The broker limits control lines to 1 KiB, topics to 256 bytes, payloads to 64 KiB, and each client queue to 32 messages or 256 KiB. Publishers enqueue copies of messages instead of writing directly to subscriber sockets, so a slow client does not hold the broker routing lock. When a client exceeds its queue bound, zigmq disconnects it rather than growing memory without limit.
+
+Delivery is in-memory and at-most-once. There is no persistence, replay, acknowledgment, or retry queue. Restarting the process loses subscriptions and queued messages.
 
 ## Project structure
 
 | Path | Purpose |
 | --- | --- |
-| `src/root.zig` | Command types, validation, parser, and parser tests |
-| `src/main.zig` | TCP listener, client threads, topic registry, fan-out, and CLI |
+| `src/root.zig` | Subject validation, wildcard matching, command parsing, and parser tests |
+| `src/main.zig` | TCP listener, client queues, routing, authentication, shutdown, and NATS subset |
+| `scripts/e2e_test.py` | Automated custom, authentication, wildcard, NATS, and shutdown tests |
+| `.github/workflows/ci.yml` | Zig 0.15.2 build and integration-test workflow |
 | `build.zig` | Zig build graph and test steps |
 | `build.zig.zon` | Package metadata with minimum Zig version pinned to 0.15.2 |
-
-## Deliberate non-goals for this MVP
-
-This first version does not implement authentication, TLS, persistence, wildcard topics, request/reply, queue groups, clustering, backpressure queues, or the complete NATS wire protocol. Those features should be added only after the small core is understood and covered by integration tests.
-
-## Roadmap
-
-The next useful steps are to add socket-level integration tests, wildcard topic matching, configurable limits, graceful shutdown, metrics, and an optional NATS-compatible protocol mode. The NATS-compatible mode should be treated as a separate milestone because existing NATS clients expect a richer protocol than this learning protocol.
 
 ## License
 

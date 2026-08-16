@@ -12,9 +12,12 @@ pub const Publish = struct {
 };
 
 pub const Command = union(enum) {
-    subscribe: []const u8,
+    subscribe: struct { subject: []const u8, group: ?[]const u8 },
     unsubscribe: []const u8,
     publish: Publish,
+    retain: struct { topic: []const u8, ttl_ms: u64, payload: []const u8 },
+    request: struct { topic: []const u8, reply: []const u8, payload: []const u8 },
+    replay: struct { from_sequence: u64, subject: []const u8 },
     auth: []const u8,
     ping,
     pong,
@@ -27,6 +30,10 @@ pub const ParseError = error{
     InvalidCommand,
     MissingTopic,
     MissingPayload,
+    MissingTtl,
+    InvalidTtl,
+    MissingSequence,
+    InvalidSequence,
     MissingToken,
     TopicTooLong,
     PayloadTooLong,
@@ -127,9 +134,17 @@ pub fn parseCommand(raw_line: []const u8) ParseError!Command {
     if (std.ascii.eqlIgnoreCase(operation.word, "SUB") or std.ascii.eqlIgnoreCase(operation.word, "UNSUB")) {
         const argument = nextWord(text, argument_start);
         if (argument.word.len == 0) return error.MissingTopic;
-        if (skipSpaces(text, argument.next) != text.len) return error.InvalidCommand;
         try validateSubject(argument.word, true);
-        if (std.ascii.eqlIgnoreCase(operation.word, "SUB")) return .{ .subscribe = argument.word };
+        var group: ?[]const u8 = null;
+        const group_start = skipSpaces(text, argument.next);
+        if (group_start != text.len) {
+            const group_word = nextWord(text, group_start);
+            if (skipSpaces(text, group_word.next) != text.len) return error.InvalidCommand;
+            try validateTopic(group_word.word);
+            group = group_word.word;
+        }
+        if (std.ascii.eqlIgnoreCase(operation.word, "SUB")) return .{ .subscribe = .{ .subject = argument.word, .group = group } };
+        if (group != null) return error.InvalidCommand;
         return .{ .unsubscribe = argument.word };
     }
 
@@ -144,6 +159,45 @@ pub fn parseCommand(raw_line: []const u8) ParseError!Command {
         return .{ .publish = .{ .topic = topic_word.word, .payload = payload } };
     }
 
+    if (std.ascii.eqlIgnoreCase(operation.word, "RETAIN")) {
+        const topic_word = nextWord(text, argument_start);
+        if (topic_word.word.len == 0) return error.MissingTopic;
+        try validateTopic(topic_word.word);
+        const ttl_word = nextWord(text, skipSpaces(text, topic_word.next));
+        if (ttl_word.word.len == 0) return error.MissingTtl;
+        const ttl_ms = std.fmt.parseInt(u64, ttl_word.word, 10) catch return error.InvalidTtl;
+        const payload_start = skipSpaces(text, ttl_word.next);
+        if (payload_start == text.len) return error.MissingPayload;
+        const payload = text[payload_start..];
+        if (payload.len > max_payload_length) return error.PayloadTooLong;
+        return .{ .retain = .{ .topic = topic_word.word, .ttl_ms = ttl_ms, .payload = payload } };
+    }
+
+    if (std.ascii.eqlIgnoreCase(operation.word, "REPLAY")) {
+        const sequence_word = nextWord(text, argument_start);
+        if (sequence_word.word.len == 0) return error.MissingSequence;
+        const from_sequence = std.fmt.parseInt(u64, sequence_word.word, 10) catch return error.InvalidSequence;
+        const subject_word = nextWord(text, skipSpaces(text, sequence_word.next));
+        if (subject_word.word.len == 0) return error.MissingTopic;
+        if (skipSpaces(text, subject_word.next) != text.len) return error.InvalidCommand;
+        try validateSubject(subject_word.word, true);
+        return .{ .replay = .{ .from_sequence = from_sequence, .subject = subject_word.word } };
+    }
+
+    if (std.ascii.eqlIgnoreCase(operation.word, "REQ")) {
+        const topic_word = nextWord(text, argument_start);
+        if (topic_word.word.len == 0) return error.MissingTopic;
+        try validateTopic(topic_word.word);
+        const reply_word = nextWord(text, skipSpaces(text, topic_word.next));
+        if (reply_word.word.len == 0) return error.MissingTopic;
+        try validateTopic(reply_word.word);
+        const payload_start = skipSpaces(text, reply_word.next);
+        if (payload_start == text.len) return error.MissingPayload;
+        const payload = text[payload_start..];
+        if (payload.len > max_payload_length) return error.PayloadTooLong;
+        return .{ .request = .{ .topic = topic_word.word, .reply = reply_word.word, .payload = payload } };
+    }
+
     return error.InvalidCommand;
 }
 
@@ -153,13 +207,26 @@ fn expectParseError(line: []const u8, expected: ParseError) !void {
 
 test "parses subscription commands case insensitively" {
     const command = try parseCommand("  sUb sensors.room-1  ");
-    try std.testing.expectEqualStrings("sensors.room-1", command.subscribe);
+    try std.testing.expectEqualStrings("sensors.room-1", command.subscribe.subject);
+    try std.testing.expect(command.subscribe.group == null);
 }
 
 test "parses publish payload with spaces" {
     const command = try parseCommand("PUB edge.temperature 21.5 degrees C");
     try std.testing.expectEqualStrings("edge.temperature", command.publish.topic);
     try std.testing.expectEqualStrings("21.5 degrees C", command.publish.payload);
+}
+
+test "parses grouped, retained, and request commands" {
+    const grouped = try parseCommand("SUB jobs.created workers");
+    try std.testing.expectEqualStrings("jobs.created", grouped.subscribe.subject);
+    try std.testing.expectEqualStrings("workers", grouped.subscribe.group.?);
+    const retained = try parseCommand("RETAIN sensors.room 5000 21.5");
+    try std.testing.expectEqual(@as(u64, 5000), retained.retain.ttl_ms);
+    const request = try parseCommand("REQ inventory.check _reply.1 item-42");
+    try std.testing.expectEqualStrings("_reply.1", request.request.reply);
+    const replay = try parseCommand("REPLAY 42 sensors.>");
+    try std.testing.expectEqual(@as(u64, 42), replay.replay.from_sequence);
 }
 
 test "parses auth commands" {

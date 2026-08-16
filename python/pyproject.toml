@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zigmq"
+version = "0.2.0"
+description = "Python ctypes bridge for the pure-Zig zigmq core"
+requires-python = ">=3.9"
+
+[tool.setuptools.packages.find]
+where = ["."]

@@ -175,10 +175,16 @@ Start a ZMP server and measure live publish acknowledgements and fan-out deliver
 
 ```sh
 zig build run -- --protocol zmp --port 4222
-python3 scripts/benchmark_zmp.py --messages 10000 --subscribers 10 --payload-size 128
+python3 scripts/benchmark_zmp.py --messages 10000 --subscribers 10 --payload-size 128 --pipeline 1 --ack-publishes
 ```
 
-Run the matrix with payload sizes of 16, 128, and 1,024 bytes and subscriber counts of 1, 10, and 50. Record the commit, Zig version, optimization mode, CPU, memory, operating system, publish rate, delivery rate, and latency. Benchmark numbers are machine-specific and are not performance guarantees.
+That command measures acknowledged publish throughput. For NATS-like one-way live telemetry, omit publisher acknowledgements:
+
+```sh
+python3 scripts/benchmark_zmp.py --messages 10000 --subscribers 10 --payload-size 128 --pipeline 1
+```
+
+Use `--ack-publishes` when you want the acknowledged comparison. Run the matrix with payload sizes of 16, 128, and 1,024 bytes and subscriber counts of 1, 10, and 50. Record the commit, Zig version, optimization mode, CPU, memory, operating system, publish mode, publish rate, delivery rate, and latency. Benchmark numbers are machine-specific and are not performance guarantees.
 
 ## Documentation
 

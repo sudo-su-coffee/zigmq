@@ -2,11 +2,60 @@
 
 ## Purpose
 
-ZMP is zigmq’s lightweight unified protocol for cloud services, IoT devices, and edge gateways. It combines fast subject-based messaging, request/reply-oriented operations, consumer-style delivery modes, retained state, and explicit acknowledgement semantics in one compact protocol.
+ZMP is one new lightweight protocol for cloud services, IoT devices, and edge gateways. It combines selected strengths of NATS and MQTT 5.0 without requiring clients to choose between two semantic systems. The protocol has one wire grammar, one canonical message envelope, one routing algorithm, and one delivery state machine.
 
-ZMP is intentionally separate from zigkv’s Redis-compatible data API. zigkv is the key-value and collection store; zigmq is the message transport, routing, delivery, and optional stream system. Existing NATS and MQTT listeners remain compatibility surfaces, but ZMP is the native protocol for new clients.
+ZMP is not Redis-compatible. `zigkv` owns Redis-compatible key-value, list, hash, and set behavior. zigmq owns transport, routing, delivery, optional streams, retained state, and edge messaging.
 
-## Transport and framing
+## Adaptive Delivery Routing
+
+The central algorithm is **Adaptive Delivery Routing (ADR)**. Each publish is normalized, authorized, matched, and represented by one immutable envelope. The broker then chooses the minimum work required by the selected delivery profile:
+
+```text
+input frame
+  -> normalize canonical subject
+  -> authenticate and authorize
+  -> resolve delivery profile
+  -> match exact/wildcard/group subscriptions once
+  -> construct one message envelope
+  -> live route to ready consumers
+  -> durable append only for durable profiles
+  -> maintain per-consumer cursor/ACK/retry state
+```
+
+ADR is intended to avoid copying the message once for every protocol implementation or running an NATS-to-MQTT bridge inside the hot path. Protocol compatibility adapters can map existing clients into the same envelope later, but ZMP itself is the native unified protocol.
+
+## Canonical message envelope
+
+```text
+Message {
+    message_id
+    subject
+    payload
+    headers/properties
+    delivery_profile
+    expiry
+    retained/state flag
+    reply_to
+    correlation_id
+    stream_sequence
+}
+```
+
+The envelope is designed to represent both service traffic and device traffic. A request/reply service uses `reply_to` and `correlation_id`; a device uses expiry, retained state, session identity, and a delivery profile; a durable consumer uses `stream_sequence` and acknowledgement state.
+
+## Delivery profiles
+
+| Profile | Semantics | Primary use |
+| --- | --- | --- |
+| `live` | At-most-once, volatile, current subscribers only | Telemetry and low-latency events |
+| `work` | One eligible consumer per group | Service workers and command processing |
+| `durable` | At-least-once, stream-backed, ACK/retry/expiry | Important commands and notifications |
+| `state` | Retained last value with expiry | Device and edge state |
+| `exact` | Future deduplicated durable mode | Transactions requiring stronger guarantees |
+
+The v0.2.0 implementation exposes the frame grammar and the `live` slice. It must reject profiles that are not implemented rather than pretending a publisher acknowledgement is the same as consumer acknowledgement.
+
+## Wire grammar
 
 The initial transport is TCP. Frames are line-oriented at the header level and use CRLF termination. Publish payloads are binary-safe and length-delimited.
 
@@ -15,68 +64,56 @@ ZMP/1 COMMAND [arguments]\r\n
 [payload bytes]\r\n
 ```
 
-The maximum subject is 256 bytes and the maximum payload is 64 KiB in the current implementation. A future binary frame can preserve the same logical fields while reducing parsing and allocation overhead.
-
-## Commands
+Initial commands:
 
 | Command | Form | Purpose |
 | --- | --- | --- |
-| `HELLO` | `ZMP/1 HELLO` | Capability or readiness handshake |
+| `HELLO` | `ZMP/1 HELLO` | Capability/readiness handshake |
 | `PING` | `ZMP/1 PING` | Liveness check |
 | `PONG` | `ZMP/1 PONG` | Liveness response |
-| `SUB` | `ZMP/1 SUB <mode> <subject>` | Subscribe to a subject or wildcard |
-| `UNSUB` | `ZMP/1 UNSUB <mode> <subject>` | Remove a subscription |
-| `PUB` | `ZMP/1 PUB <mode> <id> <subject> <length>` | Publish a binary payload |
-| `ACK` | `ZMP/1 ACK <id>` | Acknowledge a message or publish identifier |
+| `SUB` | `ZMP/1 SUB <profile> <subject>` | Subscribe with one delivery profile |
+| `UNSUB` | `ZMP/1 UNSUB <profile> <subject>` | Remove a subscription |
+| `PUB` | `ZMP/1 PUB <profile> <id> <subject> <length>` | Publish a binary payload |
+| `ACK` | `ZMP/1 ACK <id>` | Acknowledge a durable delivery when supported |
 | `BYE` | `ZMP/1 BYE` | Graceful disconnect |
 
-Subjects use dot-separated tokens in the native protocol. `*` matches one token and `>` matches the remaining suffix. The adapter layer may translate MQTT slash-separated filters into canonical ZMP subjects.
-
-## Delivery modes
-
-| Mode | Contract | Status |
-| --- | --- | --- |
-| `fast` | Volatile, low-latency, at-most-once delivery to current subscribers | Implemented in v0.2.0 |
-| `acked` | At-least-once delivery backed by a durable stream, acknowledgement, expiry, and redelivery | Staged; requires durable consumer state |
-| `exact` | Deduplicated durable delivery with crash-safe producer and consumer state | Future; not promised by v0.2.0 |
-
-The protocol exposes these modes explicitly so applications do not confuse a fast live event with a durable command. A broker may reject `acked` or `exact` when the required storage mode is not enabled.
+Subjects are canonical dot-separated names. `*` matches one token and `>` matches the remaining suffix. MQTT slash-separated topics can be mapped at an external compatibility boundary, but the ZMP core uses one subject grammar.
 
 ## Examples
 
-Subscribe to live telemetry:
+Live telemetry:
 
 ```text
-ZMP/1 SUB fast factory.line1.temperature\r\n
+ZMP/1 SUB live factory.line1.temperature\r\n
 ZMP/1 OK SUB\r\n
 ```
 
-Publish a four-byte payload:
+Live publish:
 
 ```text
-ZMP/1 PUB fast 42 factory.line1.temperature 4\r\ndata\r\n
+ZMP/1 PUB live 42 factory.line1.temperature 4\r\ndata\r\n
 ZMP/1 OK PUB 42\r\n
 ```
 
-Publish using the staged durable mode when a stream is enabled:
+A staged profile is rejected until its state machine is implemented:
 
 ```text
-ZMP/1 PUB acked 43 factory.line1.command 5\r\nSTART\r\n
-ZMP/1 ACK 43\r\n
+ZMP/1 PUB durable 43 factory.line1.command 5\r\nSTART\r\n
+ZMP/1 ERR profile_not_implemented\r\n
 ```
-
-## Design boundary
-
-ZMP owns connection state, authentication, authorization, routing, delivery, backpressure, optional persistence, replay, and metrics. Application services own business actions. A device command can be carried by ZMP, but zigmq must not decide whether an order, payment, ride, or trade is valid.
 
 ## Compatibility direction
 
-The project should provide small compatibility adapters rather than duplicate broker engines:
+Existing NATS and MQTT listeners are compatibility surfaces, not separate implementations of the new algorithm. The long-term structure is:
 
 ```text
-NATS client  ─┐
-MQTT client  ─┼─> protocol adapter ─> shared zigmq routing/storage engine
-ZMP client   ─┘
+NATS adapter ─┐
+MQTT adapter ─┼─> canonical ZMP envelope -> ADR -> routing/storage
+ZMP client  ──┘
 ```
 
-New applications should use ZMP when they control both ends and want one API. Existing devices and services can continue using MQTT or NATS while migrating gradually.
+New clients should use ZMP when they control both ends. Existing MQTT 5.0 and NATS clients can be supported through thin adapters after the canonical semantics are stable.
+
+## Correctness and safety rules
+
+A broker must reject unknown profiles, malformed lengths, oversized subjects, oversized payloads, invalid wildcard placement, duplicate subscription identifiers, and unsupported properties. Delivery acknowledgements must only be returned for the guarantee actually provided. Backpressure must remain bounded per consumer, and durable state must not be claimed until restart, redelivery, expiry, and duplicate handling tests pass.

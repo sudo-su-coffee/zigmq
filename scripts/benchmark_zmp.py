@@ -46,7 +46,7 @@ def read_zmp_message(sock: socket.socket) -> bytes:
 def subscribe_worker(host: str, port: int, subject: str, expected: int, result: list, index: int) -> None:
     sock = connect(host, port)
     try:
-        sock.sendall(f"ZMP/1 SUB fast {subject}\r\n".encode())
+        sock.sendall(f"ZMP/1 SUB live {subject}\r\n".encode())
         if not read_line(sock).startswith(b"ZMP/1 OK SUB"):
             raise RuntimeError("subscription failed")
         count = 0
@@ -69,11 +69,11 @@ def benchmark(host: str, port: int, messages: int, subscribers: int, payload_siz
 
     publisher = connect(host, port)
     try:
-        publisher.sendall(f"ZMP/1 SUB fast bench.ack\r\n".encode())
+        publisher.sendall(f"ZMP/1 SUB live bench.ack\r\n".encode())
         read_line(publisher)
         start = time.perf_counter()
         for message_id in range(messages):
-            header = f"ZMP/1 PUB fast {message_id} {subject} {len(payload)}\r\n".encode()
+            header = f"ZMP/1 PUB live {message_id} {subject} {len(payload)}\r\n".encode()
             publisher.sendall(header + payload + b"\r\n")
             response = read_line(publisher)
             if not response.startswith(b"ZMP/1 OK PUB"):
@@ -89,7 +89,7 @@ def benchmark(host: str, port: int, messages: int, subscribers: int, payload_siz
 
     publish_rate = messages / elapsed if elapsed else 0.0
     delivery_rate = messages * subscribers / elapsed if elapsed else 0.0
-    print(f"protocol=zmp mode=fast messages={messages} subscribers={subscribers} payload_bytes={payload_size}")
+    print(f"protocol=zmp profile=live messages={messages} subscribers={subscribers} payload_bytes={payload_size}")
     print(f"publish_ack_rate={publish_rate:.2f} msg/s")
     print(f"delivery_rate={delivery_rate:.2f} msg/s")
     print(f"elapsed_seconds={elapsed:.6f}")

@@ -4,13 +4,12 @@ pub const version: u8 = 1;
 pub const max_subject_length: usize = 256;
 pub const max_payload_length: usize = 64 * 1024;
 
-pub const DeliveryMode = enum { fast, acked, exact };
-
+pub const DeliveryProfile = enum { live, work, durable, state, exact };
 pub const FrameType = enum { hello, publish, subscribe, unsubscribe, ack, ping, pong, bye };
 
 pub const Frame = struct {
     kind: FrameType,
-    mode: DeliveryMode = .fast,
+    profile: DeliveryProfile = .live,
     id: u64 = 0,
     subject: []const u8 = "",
     payload: []const u8 = "",
@@ -20,7 +19,7 @@ pub const ParseError = error{
     EmptyFrame,
     InvalidVersion,
     InvalidCommand,
-    InvalidMode,
+    InvalidProfile,
     InvalidId,
     InvalidLength,
     MissingField,
@@ -29,11 +28,13 @@ pub const ParseError = error{
     InvalidPayload,
 };
 
-fn parseMode(text: []const u8) ParseError!DeliveryMode {
-    if (std.mem.eql(u8, text, "fast")) return .fast;
-    if (std.mem.eql(u8, text, "acked")) return .acked;
+pub fn parseProfile(text: []const u8) ParseError!DeliveryProfile {
+    if (std.mem.eql(u8, text, "live")) return .live;
+    if (std.mem.eql(u8, text, "work")) return .work;
+    if (std.mem.eql(u8, text, "durable")) return .durable;
+    if (std.mem.eql(u8, text, "state")) return .state;
     if (std.mem.eql(u8, text, "exact")) return .exact;
-    return error.InvalidMode;
+    return error.InvalidProfile;
 }
 
 fn parseKind(text: []const u8) ParseError!FrameType {
@@ -57,8 +58,7 @@ fn validateSubject(subject: []const u8) ParseError!void {
     if (subject.len > max_subject_length) return error.SubjectTooLong;
 }
 
-/// Parse a complete ZMP frame. The header is ASCII and the payload is length-delimited.
-/// Header form: `ZMP/1 COMMAND [mode] [id] [subject] [payload_length]\r\n`.
+/// Parse one complete ZMP frame. Publish payloads are binary-safe and length-delimited.
 pub fn parse(frame: []const u8) ParseError!Frame {
     const header_end = std.mem.indexOf(u8, frame, "\r\n") orelse return error.InvalidLength;
     const header = frame[0..header_end];
@@ -72,12 +72,12 @@ pub fn parse(frame: []const u8) ParseError!Frame {
         .hello, .ping, .pong, .bye => {},
         .ack => result.id = try parseId(tokens.next() orelse return error.MissingField),
         .subscribe, .unsubscribe => {
-            result.mode = try parseMode(tokens.next() orelse return error.MissingField);
+            result.profile = try parseProfile(tokens.next() orelse return error.MissingField);
             result.subject = tokens.next() orelse return error.MissingField;
             try validateSubject(result.subject);
         },
         .publish => {
-            result.mode = try parseMode(tokens.next() orelse return error.MissingField);
+            result.profile = try parseProfile(tokens.next() orelse return error.MissingField);
             result.id = try parseId(tokens.next() orelse return error.MissingField);
             result.subject = tokens.next() orelse return error.MissingField;
             try validateSubject(result.subject);
@@ -100,37 +100,38 @@ pub fn encodeHeader(frame: Frame, output: []u8) ![]const u8 {
         .pong => std.fmt.bufPrint(output, "ZMP/1 PONG\r\n", .{}),
         .bye => std.fmt.bufPrint(output, "ZMP/1 BYE\r\n", .{}),
         .ack => std.fmt.bufPrint(output, "ZMP/1 ACK {d}\r\n", .{frame.id}),
-        .subscribe => std.fmt.bufPrint(output, "ZMP/1 SUB {s} {s}\r\n", .{ @tagName(frame.mode), frame.subject }),
-        .unsubscribe => std.fmt.bufPrint(output, "ZMP/1 UNSUB {s} {s}\r\n", .{ @tagName(frame.mode), frame.subject }),
-        .publish => std.fmt.bufPrint(output, "ZMP/1 PUB {s} {d} {s} {d}\r\n", .{ @tagName(frame.mode), frame.id, frame.subject, frame.payload.len }),
+        .subscribe => std.fmt.bufPrint(output, "ZMP/1 SUB {s} {s}\r\n", .{ @tagName(frame.profile), frame.subject }),
+        .unsubscribe => std.fmt.bufPrint(output, "ZMP/1 UNSUB {s} {s}\r\n", .{ @tagName(frame.profile), frame.subject }),
+        .publish => std.fmt.bufPrint(output, "ZMP/1 PUB {s} {d} {s} {d}\r\n", .{ @tagName(frame.profile), frame.id, frame.subject, frame.payload.len }),
     };
 }
 
-test "parses compact publish frame" {
-    const frame = try parse("ZMP/1 PUB acked 42 sensors.room 5\r\nhello\r\n");
+test "parses compact live publish frame" {
+    const frame = try parse("ZMP/1 PUB live 42 sensors.room 5\r\nhello\r\n");
     try std.testing.expectEqual(FrameType.publish, frame.kind);
-    try std.testing.expectEqual(DeliveryMode.acked, frame.mode);
+    try std.testing.expectEqual(DeliveryProfile.live, frame.profile);
     try std.testing.expectEqual(@as(u64, 42), frame.id);
     try std.testing.expectEqualStrings("sensors.room", frame.subject);
     try std.testing.expectEqualStrings("hello", frame.payload);
 }
 
-test "parses subscriptions and control frames" {
-    const sub = try parse("ZMP/1 SUB fast factory.>\r\n");
+test "parses profiles, subscriptions, and control frames" {
+    try std.testing.expectEqual(DeliveryProfile.work, try parseProfile("work"));
+    const sub = try parse("ZMP/1 SUB state factory.>\r\n");
     try std.testing.expectEqual(FrameType.subscribe, sub.kind);
-    try std.testing.expectEqual(DeliveryMode.fast, sub.mode);
+    try std.testing.expectEqual(DeliveryProfile.state, sub.profile);
     try std.testing.expectEqualStrings("factory.>", sub.subject);
     const ack = try parse("ZMP/1 ACK 99\r\n");
     try std.testing.expectEqual(@as(u64, 99), ack.id);
 }
 
-test "rejects malformed payload lengths" {
-    try std.testing.expectError(error.InvalidLength, parse("ZMP/1 PUB fast 1 x 4\r\nabc\r\n"));
-    try std.testing.expectError(error.InvalidMode, parse("ZMP/1 SUB nope x\r\n"));
+test "rejects malformed frames and unknown profiles" {
+    try std.testing.expectError(error.InvalidLength, parse("ZMP/1 PUB live 1 x 4\r\nabc\r\n"));
+    try std.testing.expectError(error.InvalidProfile, parse("ZMP/1 SUB unknown x\r\n"));
 }
 
-test "encodes publish header" {
+test "encodes a live publish header" {
     var output: [128]u8 = undefined;
-    const header = try encodeHeader(.{ .kind = .publish, .mode = .acked, .id = 7, .subject = "a.b", .payload = "xyz" }, &output);
-    try std.testing.expectEqualStrings("ZMP/1 PUB acked 7 a.b 3\r\n", header);
+    const header = try encodeHeader(.{ .kind = .publish, .profile = .live, .id = 7, .subject = "a.b", .payload = "xyz" }, &output);
+    try std.testing.expectEqualStrings("ZMP/1 PUB live 7 a.b 3\r\n", header);
 }

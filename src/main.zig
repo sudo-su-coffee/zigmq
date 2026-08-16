@@ -165,7 +165,7 @@ const Client = struct {
 
     fn sendZmpMessage(self: *Client, subject: []const u8, payload: []const u8) !void {
         var header: [512]u8 = undefined;
-        const header_bytes = try std.fmt.bufPrint(&header, "ZMP/1 MSG fast 0 {s} {d}\r\n", .{ subject, payload.len });
+        const header_bytes = try std.fmt.bufPrint(&header, "ZMP/1 MSG live 0 {s} {d}\r\n", .{ subject, payload.len });
         const message = try self.allocator.alloc(u8, header_bytes.len + payload.len + 2);
         errdefer self.allocator.free(message);
         @memcpy(message[0..header_bytes.len], header_bytes);
@@ -1253,8 +1253,8 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
     }
     if (std.mem.eql(u8, operation, "SUB") or std.mem.eql(u8, operation, "UNSUB")) {
         const mode = tokens.next() orelse return zmpError(client, "missing_mode");
-        if (!std.mem.eql(u8, mode, "fast") and !std.mem.eql(u8, mode, "acked") and !std.mem.eql(u8, mode, "exact")) return zmpError(client, "invalid_mode");
-        if (!std.mem.eql(u8, mode, "fast")) return zmpError(client, "mode_not_implemented");
+        if (!std.mem.eql(u8, mode, "live") and !std.mem.eql(u8, mode, "work") and !std.mem.eql(u8, mode, "durable") and !std.mem.eql(u8, mode, "state") and !std.mem.eql(u8, mode, "exact")) return zmpError(client, "invalid_mode");
+        if (!std.mem.eql(u8, mode, "live")) return zmpError(client, "mode_not_implemented");
         const subject = tokens.next() orelse return zmpError(client, "missing_subject");
         if (tokens.next() != null) return zmpError(client, "invalid_command");
         zigmq.validateSubject(subject, true) catch return zmpError(client, "invalid_subject");
@@ -1273,8 +1273,8 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
     }
     if (std.mem.eql(u8, operation, "PUB")) {
         const mode = tokens.next() orelse return zmpError(client, "missing_mode");
-        if (!std.mem.eql(u8, mode, "fast") and !std.mem.eql(u8, mode, "acked") and !std.mem.eql(u8, mode, "exact")) return zmpError(client, "invalid_mode");
-        if (!std.mem.eql(u8, mode, "fast")) return zmpError(client, "mode_not_implemented");
+        if (!std.mem.eql(u8, mode, "live") and !std.mem.eql(u8, mode, "work") and !std.mem.eql(u8, mode, "durable") and !std.mem.eql(u8, mode, "state") and !std.mem.eql(u8, mode, "exact")) return zmpError(client, "invalid_mode");
+        if (!std.mem.eql(u8, mode, "live")) return zmpError(client, "mode_not_implemented");
         const id_text = tokens.next() orelse return zmpError(client, "missing_id");
         const id = std.fmt.parseInt(u64, id_text, 10) catch return zmpError(client, "invalid_id");
         const subject = tokens.next() orelse return zmpError(client, "missing_subject");

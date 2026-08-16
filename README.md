@@ -4,27 +4,58 @@
 
 > zigmq is intentionally smaller than NATS. It is suitable for learning, experiments, and lightweight edge workloads. Use NATS when you need mature clustering, persistence, security, monitoring, and a broad client ecosystem.
 
-## Unified ZMP protocol — v0.2.0 direction
+## Unified ZMP protocol — one new algorithm
 
-zigmq is evolving toward **ZMP (Zig Message Protocol)**: one compact protocol for cloud services, IoT devices, and edge gateways. ZMP combines NATS-like low-latency publish/subscribe, request/reply, wildcard routing, and consumer groups with MQTT-like device sessions, retained state, explicit delivery modes, acknowledgements, expiry, and reconnect-oriented recovery.
+zigmq is evolving toward **ZMP (Zig Message Protocol)**: one new lightweight protocol for cloud services, IoT devices, and edge gateways. It is not “NATS mode plus MQTT mode” and it is not a Redis-compatible API. ZMP has one wire grammar, one message model, one routing algorithm, one security model, and one delivery state machine.
 
-ZMP is a new lightweight protocol, not Redis compatibility and not a requirement to run separate NATS and MQTT brokers. The existing NATS and MQTT listeners remain compatibility surfaces; ZMP is the unified native API for new clients.
+ZMP takes useful ideas from NATS and MQTT 5.0 and recombines them into a single protocol:
+
+| ZMP concept | NATS-inspired strength | MQTT-inspired strength |
+| --- | --- | --- |
+| Canonical subject | Fast subjects, wildcards, request/reply | Device-friendly hierarchical topics |
+| Delivery profile | Low-latency live delivery | QoS-like acknowledgement and retry |
+| Consumer policy | Queue groups and work sharing | Sessions, offline delivery, expiry |
+| State | Stream sequence and replay | Retained last-value state |
+| Connection | Lightweight persistent TCP session | Keepalive, reconnect, Will-style lifecycle |
+| Flow control | Bounded subscriber queues | Receive maximum and inflight limits |
+
+The core algorithm is **Adaptive Delivery Routing (ADR)**. Every publish is processed once:
 
 ```text
-ZMP/1 SUB fast factory.line1.temperature\r\n
-ZMP/1 PUB fast 42 factory.line1.temperature 4\r\ndata\r\n
+normalize subject/topic
+        ↓
+authorize publisher and resolve delivery profile
+        ↓
+match exact, wildcard, and consumer-group subscriptions once
+        ↓
+create one immutable message envelope
+        ↓
+route live copies to ready consumers
+        ↓
+append one durable record only when the profile requires it
+        ↓
+track consumer state, expiry, ACK, retry, and reconnect recovery
+```
+
+This avoids a protocol bridge between NATS and MQTT semantics. A cloud service, sensor, gateway, or edge worker uses the same ZMP message envelope and ADR state machine. The client chooses a delivery profile rather than choosing a separate protocol.
+
+```text
+ZMP/1 SUB live factory.line1.temperature\r\n
+ZMP/1 PUB live 42 factory.line1.temperature 4\r\ndata\r\n
 ZMP/1 OK PUB 42\r\n
 ```
 
-The protocol uses a small CRLF header and a length-delimited payload. Its delivery modes are explicit:
+The planned delivery profiles are:
 
-| Mode | Meaning in v0.2.0 |
+| Profile | Contract |
 | --- | --- |
-| `fast` | Volatile, low-latency, at-most-once delivery |
-| `acked` | Reserved for the optional local durable stream and acknowledgement path |
-| `exact` | Reserved for a future deduplicated durable mode; not yet advertised as complete |
+| `live` | Low-latency, volatile, at-most-once delivery for telemetry and events |
+| `work` | Consumer-group delivery for one-of-N service workers |
+| `durable` | At-least-once delivery with a stream sequence, ACK, expiry, and retry |
+| `state` | Retained last-value delivery for device and edge state |
+| `exact` | Future deduplicated durable mode; not promised until crash recovery is complete |
 
-The v0.2.0 implementation establishes the frame grammar, parser/encoder tests, protocol dispatch, subject subscriptions, bounded payloads, fast publish acknowledgements, and a benchmark path. Durable `acked` delivery, persistent sessions, and exactly-once semantics are deliberately staged rather than implied by the first protocol slice. See [`docs/ZMP_PROTOCOL.md`](docs/ZMP_PROTOCOL.md) and [`docs/ZMP_V0.2.0_PLAN.md`](docs/ZMP_V0.2.0_PLAN.md).
+The current code supports the first `live` slice. The rest of the algorithm is documented as the v0.2.0-to-v1 implementation plan so the protocol is designed correctly before features are added incrementally. See [`docs/ZMP_PROTOCOL.md`](docs/ZMP_PROTOCOL.md) and [`docs/ZMP_V0.2.0_PLAN.md`](docs/ZMP_V0.2.0_PLAN.md).
 
 ## Features
 
@@ -43,7 +74,7 @@ The v0.2.0 implementation establishes the frame grammar, parser/encoder tests, p
 | Authentication | Optional shared token using `--auth-token`; constant-time comparison and bounded pre-auth commands |
 | Safety limits | 1,024 clients, 1,024 subscriptions per client, 8 pre-auth commands per connection |
 | Stream file security | Durable stream files are created and chmodded to owner-only `0600` permissions |
-| ZMP mode | Native unified protocol: `HELLO`, `PUB`, `SUB`, `UNSUB`, `ACK`, `PING`, `PONG`, `BYE`; `fast` plus staged durable modes |
+| ZMP | Native unified protocol and ADR routing algorithm: `HELLO`, `PUB`, `SUB`, `UNSUB`, `ACK`, `PING`, `PONG`, `BYE`; `live`, `work`, `durable`, `state`, and `exact` profiles |
 | NATS mode | Small subset: `INFO`, `CONNECT`, `PUB`, `SUB`, `UNSUB`, `MSG`, `PING`, `PONG` |
 | CLI | Pure-Zig `server`, `pub`, `sub`, `ping`, `shell`, and `bench pub` commands |
 | Embedding | `libzigmq_core.so` exports subject helpers, hashing, and frame encoding for the Python ctypes bridge |

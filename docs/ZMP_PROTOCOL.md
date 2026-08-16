@@ -73,7 +73,7 @@ Initial commands:
 | `PONG` | `ZMP/1 PONG` | Liveness response |
 | `SUB` | `ZMP/1 SUB <profile> <subject>` | Subscribe with one delivery profile |
 | `UNSUB` | `ZMP/1 UNSUB <profile> <subject>` | Remove a subscription |
-| `PUB` | `ZMP/1 PUB <profile> <id> <subject> <length>` | Publish a binary payload |
+| `PUB` | `ZMP/1 PUB <profile> <id> <subject> <length>` | Publish a binary payload; use `-` as the id for live no-ack delivery |
 | `ACK` | `ZMP/1 ACK <id>` | Acknowledge a durable delivery when supported |
 | `BYE` | `ZMP/1 BYE` | Graceful disconnect |
 
@@ -88,12 +88,20 @@ ZMP/1 SUB live factory.line1.temperature\r\n
 ZMP/1 OK SUB\r\n
 ```
 
-Live publish:
+Live publish with an application-visible publish acknowledgement:
 
 ```text
 ZMP/1 PUB live 42 factory.line1.temperature 4\r\ndata\r\n
 ZMP/1 OK PUB 42\r\n
 ```
+
+Live publish without a publish acknowledgement, intended for high-rate telemetry:
+
+```text
+ZMP/1 PUB live - factory.line1.temperature 4\r\ndata\r\n
+```
+
+The `-` identifier removes only the publisher acknowledgement. It does not change the live profile into durable delivery and does not create consumer acknowledgement state.
 
 A staged profile is rejected until its state machine is implemented:
 

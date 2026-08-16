@@ -62,7 +62,7 @@ def subscribe_worker(host: str, port: int, subject: str, expected: int, result: 
         sock.close()
 
 
-def benchmark(host: str, port: int, messages: int, subscribers: int, payload_size: int, pipeline: int) -> None:
+def benchmark(host: str, port: int, messages: int, subscribers: int, payload_size: int, pipeline: int, acknowledge: bool) -> None:
     subject = "bench.zmp"
     payload = b"x" * payload_size
     received = [0] * subscribers
@@ -80,12 +80,14 @@ def benchmark(host: str, port: int, messages: int, subscribers: int, payload_siz
         while sent < messages:
             batch = min(pipeline, messages - sent)
             for message_id in range(sent, sent + batch):
+                message_id = str(message_id) if acknowledge else "-"
                 header = f"ZMP/1 PUB live {message_id} {subject} {len(payload)}\r\n".encode()
                 publisher.sendall(header + payload + b"\r\n")
-            for _ in range(batch):
-                response = read_line(publisher_reader)
-                if not response.startswith(b"ZMP/1 OK PUB"):
-                    raise RuntimeError(f"publish failed: {response!r}")
+            if acknowledge:
+                for _ in range(batch):
+                    response = read_line(publisher_reader)
+                    if not response.startswith(b"ZMP/1 OK PUB"):
+                        raise RuntimeError(f"publish failed: {response!r}")
             sent += batch
         elapsed = time.perf_counter() - start
     finally:
@@ -99,7 +101,8 @@ def benchmark(host: str, port: int, messages: int, subscribers: int, payload_siz
 
     publish_rate = messages / elapsed if elapsed else 0.0
     delivery_rate = messages * subscribers / elapsed if elapsed else 0.0
-    print(f"protocol=zmp profile=live messages={messages} subscribers={subscribers} payload_bytes={payload_size} pipeline={pipeline}")
+    ack_mode = "ack" if acknowledge else "no-ack"
+    print(f"protocol=zmp profile=live messages={messages} subscribers={subscribers} payload_bytes={payload_size} pipeline={pipeline} publish_mode={ack_mode}")
     print(f"publish_ack_rate={publish_rate:.2f} msg/s")
     print(f"delivery_rate={delivery_rate:.2f} msg/s")
     print(f"elapsed_seconds={elapsed:.6f}")
@@ -113,7 +116,8 @@ if __name__ == "__main__":
     parser.add_argument("--subscribers", type=int, default=1)
     parser.add_argument("--payload-size", type=int, default=128)
     parser.add_argument("--pipeline", type=int, default=1, help="Publishes sent before reading acknowledgements; keep at or below the broker queue limit")
+    parser.add_argument("--ack-publishes", action="store_true", help="Request a ZMP publish acknowledgement for every message")
     args = parser.parse_args()
     if args.pipeline < 1:
         parser.error("--pipeline must be positive")
-    benchmark(args.host, args.port, args.messages, args.subscribers, args.payload_size, args.pipeline)
+    benchmark(args.host, args.port, args.messages, args.subscribers, args.payload_size, args.pipeline, args.ack_publishes)

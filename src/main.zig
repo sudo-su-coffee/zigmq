@@ -65,6 +65,7 @@ const Client = struct {
     closed: bool = false,
     last_delivery_generation: usize = 0,
     authenticated: bool = true,
+    mqtt_connected: bool = false,
     preauth_commands: usize = 0,
     verbose: bool = true,
     subscriptions: std.StringHashMap(?[]u8),

@@ -1276,7 +1276,7 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
         if (!std.mem.eql(u8, mode, "live") and !std.mem.eql(u8, mode, "work") and !std.mem.eql(u8, mode, "durable") and !std.mem.eql(u8, mode, "state") and !std.mem.eql(u8, mode, "exact")) return zmpError(client, "invalid_mode");
         if (!std.mem.eql(u8, mode, "live")) return zmpError(client, "mode_not_implemented");
         const id_text = tokens.next() orelse return zmpError(client, "missing_id");
-        const id = std.fmt.parseInt(u64, id_text, 10) catch return zmpError(client, "invalid_id");
+        const id: ?u64 = if (std.mem.eql(u8, id_text, "-")) null else std.fmt.parseInt(u64, id_text, 10) catch return zmpError(client, "invalid_id");
         const subject = tokens.next() orelse return zmpError(client, "missing_subject");
         const size_text = tokens.next() orelse return zmpError(client, "missing_length");
         if (tokens.next() != null) return zmpError(client, "invalid_command");
@@ -1286,7 +1286,7 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
         const payload = readNatsPayload(reader, broker.allocator, size) catch return zmpError(client, "invalid_payload");
         defer broker.allocator.free(payload);
         broker.publish(subject, payload);
-        client.sendFmt("ZMP/1 OK PUB {d}\r\n", .{id}) catch return false;
+        if (id) |message_id| client.sendFmt("ZMP/1 OK PUB {d}\r\n", .{message_id}) catch return false;
         return true;
     }
     if (std.mem.eql(u8, operation, "ACK")) {

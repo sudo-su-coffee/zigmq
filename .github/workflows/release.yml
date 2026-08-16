@@ -77,8 +77,10 @@ jobs:
           mkdir -p dist
           cp zig-out/bin/zigmq dist/zigmq
           cp README.md LICENSE dist/
-          tar -C dist -czf "zigmq-${version}-linux-x86_64.tar.gz" zigmq README.md LICENSE
-          sha256sum "zigmq-${version}-linux-x86_64.tar.gz" > "zigmq-${version}-linux-x86_64.tar.gz.sha256"
+          archive="dist/zigmq-${version}-linux-x86_64.tar.gz"
+          checksum="${archive}.sha256"
+          tar -C dist -czf "$archive" zigmq README.md LICENSE
+          sha256sum "$archive" > "$checksum"
 
       - name: Generate categorized release notes
         env:

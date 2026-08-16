@@ -7,6 +7,7 @@ const cli = @import("cli.zig");
 const Allocator = std.mem.Allocator;
 const Protocol = enum { custom, nats };
 const NatsSubscription = struct { subject: []u8, sid: []u8 };
+const NatsSubscriptionRef = struct { subject: []const u8, sid: []const u8, client: *Client };
 const RetainedMessage = struct { payload: []u8, expires_at_ns: i128 };
 const WildcardSubscription = struct { pattern: []const u8, client: *Client };
 const GroupSubscription = struct { pattern: []const u8, group: []const u8, client: *Client };
@@ -19,6 +20,8 @@ const Client = struct {
     queue_mutex: std.Thread.Mutex = .{},
     queue_condition: std.Thread.Condition = .{},
     queue: std.ArrayList([]u8) = .empty,
+    queue_head: usize = 0,
+    queue_len: usize = 0,
     queue_bytes: usize = 0,
     closed: bool = false,
     last_delivery_generation: usize = 0,
@@ -52,7 +55,7 @@ const Client = struct {
             self.allocator.free(message);
             return error.Closed;
         }
-        if (self.queue.items.len >= zigmq.max_queue_messages or self.queue_bytes + message.len > zigmq.max_queue_bytes) {
+        if (self.queue_len >= zigmq.max_queue_messages or self.queue_bytes + message.len > zigmq.max_queue_bytes) {
             self.closed = true;
             self.queue_condition.broadcast();
             self.allocator.free(message);
@@ -66,6 +69,7 @@ const Client = struct {
             _ = posix.shutdown(self.stream.handle, .both) catch {};
             return err;
         };
+        self.queue_len += 1;
         self.queue_bytes += message.len;
         self.queue_condition.signal();
     }
@@ -109,15 +113,27 @@ const Client = struct {
     fn writerLoop(self: *Client) void {
         while (true) {
             self.queue_mutex.lock();
-            while (self.queue.items.len == 0 and !self.closed) {
+            while (self.queue_len == 0 and !self.closed) {
                 self.queue_condition.wait(&self.queue_mutex);
             }
-            if (self.queue.items.len == 0 and self.closed) {
+            if (self.queue_len == 0 and self.closed) {
                 self.queue_mutex.unlock();
                 return;
             }
-            const message = self.queue.orderedRemove(0);
+            const message = self.queue.items[self.queue_head];
+            self.queue.items[self.queue_head] = undefined;
+            self.queue_head += 1;
+            self.queue_len -= 1;
             self.queue_bytes -= message.len;
+            if (self.queue_len == 0) {
+                self.queue.clearRetainingCapacity();
+                self.queue_head = 0;
+            } else if (self.queue_head >= 16 and self.queue_head * 2 >= self.queue.items.len) {
+                const remaining = self.queue.items.len - self.queue_head;
+                std.mem.copyForwards([]u8, self.queue.items[0..remaining], self.queue.items[self.queue_head..]);
+                self.queue.shrinkRetainingCapacity(remaining);
+                self.queue_head = 0;
+            }
             self.queue_mutex.unlock();
 
             self.stream.writeAll(message) catch {
@@ -130,7 +146,7 @@ const Client = struct {
     }
 
     fn deinit(self: *Client) void {
-        for (self.queue.items) |message| self.allocator.free(message);
+        for (self.queue.items[self.queue_head..]) |message| self.allocator.free(message);
         self.queue.deinit(self.allocator);
         self.subscriptions.deinit();
         for (self.nats_subscriptions.items) |subscription| {
@@ -161,6 +177,8 @@ const Broker = struct {
     exact_subscribers: std.StringHashMap(std.ArrayList(*Client)),
     wildcard_subscriptions: std.ArrayList(WildcardSubscription) = .empty,
     group_subscriptions: std.ArrayList(GroupSubscription) = .empty,
+    nats_subscribers: std.StringHashMap(std.ArrayList(NatsSubscriptionRef)),
+    nats_wildcard_subscriptions: std.ArrayList(NatsSubscriptionRef) = .empty,
     retained: std.StringHashMap(RetainedMessage),
     stream_file: ?std.fs.File = null,
     stream_sequence: u64 = 0,
@@ -174,6 +192,7 @@ const Broker = struct {
             .port = port,
             .auth_token = auth_token,
             .exact_subscribers = std.StringHashMap(std.ArrayList(*Client)).init(allocator),
+            .nats_subscribers = std.StringHashMap(std.ArrayList(NatsSubscriptionRef)).init(allocator),
             .retained = std.StringHashMap(RetainedMessage).init(allocator),
             .stream_file = stream_file,
         };
@@ -191,6 +210,32 @@ const Broker = struct {
         }
     }
 
+    fn removeNatsIndexLocked(self: *Broker, client: *Client, subject: []const u8, sid: []const u8) void {
+        if (isWildcard(subject)) {
+            for (self.nats_wildcard_subscriptions.items, 0..) |subscription, index| {
+                if (subscription.client == client and std.mem.eql(u8, subscription.subject, subject) and std.mem.eql(u8, subscription.sid, sid)) {
+                    _ = self.nats_wildcard_subscriptions.swapRemove(index);
+                    return;
+                }
+            }
+            return;
+        }
+        if (self.nats_subscribers.getPtr(subject)) |list| {
+            for (list.items, 0..) |subscription, index| {
+                if (subscription.client == client and std.mem.eql(u8, subscription.sid, sid)) {
+                    _ = list.swapRemove(index);
+                    break;
+                }
+            }
+            if (list.items.len == 0) {
+                const removed = self.nats_subscribers.fetchRemove(subject).?;
+                var removed_list = removed.value;
+                removed_list.deinit(self.allocator);
+                self.allocator.free(removed.key);
+            }
+        }
+    }
+
     fn disconnect(self: *Broker, client: *Client) void {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -204,6 +249,7 @@ const Broker = struct {
         }
         client.subscriptions.clearRetainingCapacity();
         for (client.nats_subscriptions.items) |subscription| {
+            self.removeNatsIndexLocked(client, subscription.subject, subscription.sid);
             self.allocator.free(subscription.subject);
             self.allocator.free(subscription.sid);
         }
@@ -225,6 +271,13 @@ const Broker = struct {
         self.exact_subscribers.deinit();
         self.wildcard_subscriptions.deinit(self.allocator);
         self.group_subscriptions.deinit(self.allocator);
+        var nats_iterator = self.nats_subscribers.iterator();
+        while (nats_iterator.next()) |entry| {
+            entry.value_ptr.deinit(self.allocator);
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.nats_subscribers.deinit();
+        self.nats_wildcard_subscriptions.deinit(self.allocator);
         var retained_iterator = self.retained.iterator();
         while (retained_iterator.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
@@ -415,11 +468,14 @@ const Broker = struct {
         self.publishCustom(topic, payload, null);
         self.mutex.lock();
         defer self.mutex.unlock();
-        for (self.clients.items) |client| {
-            for (client.nats_subscriptions.items) |subscription| {
-                if (zigmq.subjectMatches(subscription.subject, topic)) {
-                    client.sendNatsMessage(topic, subscription.sid, payload) catch |err| std.log.debug("nats delivery failed: {s}", .{@errorName(err)});
-                }
+        if (self.nats_subscribers.get(topic)) |list| {
+            for (list.items) |subscription| {
+                subscription.client.sendNatsMessage(topic, subscription.sid, payload) catch |err| std.log.debug("nats delivery failed: {s}", .{@errorName(err)});
+            }
+        }
+        for (self.nats_wildcard_subscriptions.items) |subscription| {
+            if (zigmq.subjectMatches(subscription.subject, topic)) {
+                subscription.client.sendNatsMessage(topic, subscription.sid, payload) catch |err| std.log.debug("nats delivery failed: {s}", .{@errorName(err)});
             }
         }
     }
@@ -504,6 +560,26 @@ const Broker = struct {
         const sid_copy = try self.allocator.dupe(u8, sid);
         errdefer self.allocator.free(sid_copy);
         try client.nats_subscriptions.append(self.allocator, .{ .subject = subject_copy, .sid = sid_copy });
+        errdefer {
+            const removed = client.nats_subscriptions.pop().?;
+            self.allocator.free(removed.subject);
+            self.allocator.free(removed.sid);
+        }
+        const reference = NatsSubscriptionRef{ .subject = subject_copy, .sid = sid_copy, .client = client };
+        if (isWildcard(subject)) {
+            try self.nats_wildcard_subscriptions.append(self.allocator, reference);
+            return;
+        }
+        if (self.nats_subscribers.getPtr(subject)) |list| {
+            try list.append(self.allocator, reference);
+            return;
+        }
+        const key = try self.allocator.dupe(u8, subject);
+        errdefer self.allocator.free(key);
+        var list: std.ArrayList(NatsSubscriptionRef) = .empty;
+        errdefer list.deinit(self.allocator);
+        try list.append(self.allocator, reference);
+        try self.nats_subscribers.put(key, list);
     }
 
     fn natsUnsubscribe(self: *Broker, client: *Client, sid: []const u8) bool {
@@ -511,9 +587,10 @@ const Broker = struct {
         defer self.mutex.unlock();
         for (client.nats_subscriptions.items, 0..) |subscription, index| {
             if (std.mem.eql(u8, subscription.sid, sid)) {
+                self.removeNatsIndexLocked(client, subscription.subject, subscription.sid);
                 self.allocator.free(subscription.subject);
                 self.allocator.free(subscription.sid);
-                _ = client.nats_subscriptions.orderedRemove(index);
+                _ = client.nats_subscriptions.swapRemove(index);
                 return true;
             }
         }

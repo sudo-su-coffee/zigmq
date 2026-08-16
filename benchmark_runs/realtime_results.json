@@ -4,21 +4,21 @@
     "messages": 1000,
     "devices": 100,
     "hz_per_device": 10,
-    "elapsed_s": 0.0837233429774642,
-    "messages_per_sec": 11944.100228644356
+    "elapsed_s": 0.04896008304785937,
+    "messages_per_sec": 20424.801955962408
   },
   {
     "scenario": "command_control",
     "devices": 100,
     "commands": 100,
-    "elapsed_s": 0.028195055027026683,
-    "commands_per_sec": 3546.7212212972768
+    "elapsed_s": 0.03661543701309711,
+    "commands_per_sec": 2731.088528705274
   },
   {
     "scenario": "alert_burst",
     "events": 1000,
-    "elapsed_s": 0.06958136102184653,
-    "events_per_sec": 14371.664844066918
+    "elapsed_s": 0.05478434398537502,
+    "events_per_sec": 18253.390060980844
   },
   {
     "scenario": "request_reply_timeout",
@@ -40,8 +40,8 @@
       10,
       10
     ],
-    "elapsed_s": 0.03389723796863109,
-    "messages_per_sec": 885.0278606110138
+    "elapsed_s": 0.033999490027781576,
+    "messages_per_sec": 882.3661759481239
   }
 ]
 REALTIME_SCENARIOS_OK

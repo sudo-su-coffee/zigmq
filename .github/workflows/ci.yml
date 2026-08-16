@@ -43,3 +43,6 @@ jobs:
 
       - name: Real-time workload scenarios
         run: python3 scripts/realtime_scenarios.py --binary ./zig-out/bin/zigmq
+
+      - name: NATS index regression
+        run: python3 scripts/nats_index_test.py --binary ./zig-out/bin/zigmq

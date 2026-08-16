@@ -241,13 +241,15 @@ Run the scenarios with:
 python3 scripts/realtime_scenarios.py --binary ./zig-out/bin/zigmq
 ```
 
-The latest saved ReleaseFast run completed the telemetry scenario at approximately 11,944 messages per second, the alert burst at approximately 14,372 events per second, and evenly distributed the 30-job consumer-group check as 10/10/10. These are workload-harness measurements on one sandbox, not service-level guarantees.
+The latest saved ReleaseFast run completed the telemetry scenario at approximately 20,425 messages per second, the alert burst at approximately 18,253 events per second, and evenly distributed the 30-job consumer-group check as 10/10/10. These are workload-harness measurements on one sandbox, not service-level guarantees.
 
 ## Throughput optimization
 
-The broker maintains an exact-subject subscriber index and a compact wildcard subscription list. Publishing now looks up exact subscribers directly instead of scanning every connected client and every subscription. A per-publish generation marker also prevents duplicate delivery when the same client matches both an exact and wildcard subscription.
+The broker maintains an exact-subject subscriber index and compact wildcard subscription lists for both custom and NATS subscriptions. Exact publishes use hash-map lookup instead of scanning every client. The client output queue uses a bounded head-index queue, making dequeue amortized **O(1)** instead of shifting every pending message with `orderedRemove(0)`. A per-publish generation marker prevents duplicate custom delivery when one client matches both exact and wildcard subscriptions.
 
-On the same ReleaseFast localhost benchmark, the indexed routing branch measured approximately **23,200 publish acknowledgments per second** and **14,100 one-subscriber fan-out messages per second**, compared with a clean-main repeat baseline of approximately **18,700** and **12,000**, respectively. With 50 subscribers and 1,000 messages, broker throughput improved from approximately **1,723** to **1,785 messages per second** while total deliveries improved from approximately **86,145** to **89,266 deliveries per second**. See `performance_results.md` for the exact runs.
+The latest ReleaseFast NATS-compatible run with 128-byte payloads measured approximately **12,279**, **7,303**, and **2,445 broker messages per second** for 1, 10, and 50 subscribers, respectively. The corresponding NATS v2.14.5 measurements were approximately **19,078**, **11,543**, and **3,854 messages per second**. This is still an honest gap, but it is an improvement over the earlier 10,837, 6,735, and 2,230 ZigMQ measurements for the same topology. See `optimization_results.md` for the before/after table and methodology.
+
+The older custom-protocol routing comparison remains in `performance_results.md`. Further gains will likely require reducing per-message allocation and write syscall overhead, not simply adding more subject scans or features.
 
 For multi-subscriber testing, run:
 
@@ -272,8 +274,10 @@ python3 scripts/benchmark_fanout.py --binary ./zig-out/bin/zigmq --subscribers 5
 | `scripts/benchmark.py` | Local throughput and client-capacity benchmark |
 | `scripts/benchmark_fanout.py` | Multi-subscriber routing benchmark |
 | `scripts/compare_nats.py` | Controlled NATS-compatible comparison harness |
+| `scripts/nats_index_test.py` | Exact-index, wildcard, unsubscribe, and disconnect regression test |
 | `scripts/format_nats_matrix.py` | Reproducible formatter for raw comparison logs |
 | `comparison_results.md` | Captured ZigMQ versus NATS matrix and interpretation |
+| `optimization_results.md` | Before/after queue and NATS-index measurements |
 | `benchmark_results.md` | Recorded sandbox baseline and interpretation |
 | `performance_results.md` | Main-versus-optimized throughput comparison |
 | `.github/workflows/ci.yml` | Zig 0.15.2 build and integration-test workflow |

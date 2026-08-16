@@ -1,0 +1,96 @@
+starting zigmq-nats-mode
+zigmq-nats-mode subscribers_ready
+zigmq-nats-mode publisher_ready
+zigmq-nats-mode progress=1/1000
+zigmq-nats-mode progress=1000/1000
+starting nats-server
+nats-server subscribers_ready
+nats-server publisher_ready
+nats-server progress=1/1000
+nats-server progress=1000/1000
+[
+  {
+    "broker": "zigmq-nats-mode",
+    "messages": 1000,
+    "subscribers": 1,
+    "payload_bytes": 128,
+    "broker_messages_per_sec": 12278.871943963746,
+    "deliveries_per_sec": 12278.871943963746,
+    "latency_us_p50": 41.372,
+    "latency_us_p99": 81.022
+  },
+  {
+    "broker": "nats-server",
+    "messages": 1000,
+    "subscribers": 1,
+    "payload_bytes": 128,
+    "broker_messages_per_sec": 19078.057452349025,
+    "deliveries_per_sec": 19078.057452349025,
+    "latency_us_p50": 51.347,
+    "latency_us_p99": 82.914
+  }
+]
+starting zigmq-nats-mode
+zigmq-nats-mode subscribers_ready
+zigmq-nats-mode publisher_ready
+zigmq-nats-mode progress=1/1000
+zigmq-nats-mode progress=1000/1000
+starting nats-server
+nats-server subscribers_ready
+nats-server publisher_ready
+nats-server progress=1/1000
+nats-server progress=1000/1000
+[
+  {
+    "broker": "zigmq-nats-mode",
+    "messages": 1000,
+    "subscribers": 10,
+    "payload_bytes": 128,
+    "broker_messages_per_sec": 7302.806550348733,
+    "deliveries_per_sec": 73028.06550348733,
+    "latency_us_p50": 86.249,
+    "latency_us_p99": 195.141
+  },
+  {
+    "broker": "nats-server",
+    "messages": 1000,
+    "subscribers": 10,
+    "payload_bytes": 128,
+    "broker_messages_per_sec": 11542.674392640345,
+    "deliveries_per_sec": 115426.74392640345,
+    "latency_us_p50": 84.026,
+    "latency_us_p99": 135.558
+  }
+]
+starting zigmq-nats-mode
+zigmq-nats-mode subscribers_ready
+zigmq-nats-mode publisher_ready
+zigmq-nats-mode progress=1/1000
+zigmq-nats-mode progress=1000/1000
+starting nats-server
+nats-server subscribers_ready
+nats-server publisher_ready
+nats-server progress=1/1000
+nats-server progress=1000/1000
+[
+  {
+    "broker": "zigmq-nats-mode",
+    "messages": 1000,
+    "subscribers": 50,
+    "payload_bytes": 128,
+    "broker_messages_per_sec": 2444.6418432974997,
+    "deliveries_per_sec": 122232.09216487498,
+    "latency_us_p50": 334.6,
+    "latency_us_p99": 628.94
+  },
+  {
+    "broker": "nats-server",
+    "messages": 1000,
+    "subscribers": 50,
+    "payload_bytes": 128,
+    "broker_messages_per_sec": 3853.9882779944487,
+    "deliveries_per_sec": 192699.41389972242,
+    "latency_us_p50": 255.585,
+    "latency_us_p99": 372.396
+  }
+]

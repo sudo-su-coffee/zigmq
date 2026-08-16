@@ -187,6 +187,8 @@ Run the matrix with payload sizes of 16, 128, and 1,024 bytes and subscriber cou
 | [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) | Short installation and first-message guide |
 | [`docs/ZMP_PROTOCOL.md`](docs/ZMP_PROTOCOL.md) | Native ZMP wire format and semantics |
 | [`docs/ZMP_V0.2.0_PLAN.md`](docs/ZMP_V0.2.0_PLAN.md) | ADR roadmap and staged delivery profiles |
+| [`docs/ZMP_LIVE_TEST_PLAN.md`](docs/ZMP_LIVE_TEST_PLAN.md) | Live-profile acceptance gates and test matrix |
+| [`docs/ZMP_LIVE_BENCHMARK_2026-08-16.md`](docs/ZMP_LIVE_BENCHMARK_2026-08-16.md) | Recorded beta benchmark results and gate decision |
 | [`docs/RELEASE_0.2.0-beta.1.md`](docs/RELEASE_0.2.0-beta.1.md) | Beta release notes and known limitations |
 | [`CHANGELOG.md`](CHANGELOG.md) | Version history |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution and test workflow |

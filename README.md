@@ -282,6 +282,7 @@ python3 scripts/benchmark_fanout.py --binary ./zig-out/bin/zigmq --subscribers 5
 | `performance_results.md` | Main-versus-optimized throughput comparison |
 | `.github/workflows/ci.yml` | Zig 0.15.2 build and integration-test workflow |
 | `.github/workflows/release.yml` | Manual-only semantic-version release workflow |
+| `.github/scripts/generate-release-notes.sh` | Categorized changelog and custom-note generator |
 | `build.zig` | Zig build graph and test steps |
 | `build.zig.zon` | Package metadata with minimum Zig version pinned to 0.15.2 |
 
@@ -296,8 +297,9 @@ To publish a release, open the repository’s **Actions** tab, select the **Rele
 | `version` | `v0.2.0` | New semantic-version release tag; it must not already exist |
 | `target` | `main` | Branch or commit to validate and release |
 | `prerelease` | `false` | Whether GitHub should mark the release as a prerelease |
+| `custom_notes` | Optional Markdown | Maintainer notes inserted at the top of the release notes |
 
-The workflow checks the version format, refuses an existing tag, runs `zig build test`, builds ReleaseFast, and then creates the GitHub release with generated notes. The workflow requires repository contents write permission, so only maintainers with appropriate Actions permissions can publish a release.
+The workflow checks the version format, refuses an existing tag, runs `zig build test`, builds ReleaseFast, categorizes commits since the previous tag into features, fixes, performance, documentation, maintenance, breaking changes, and other changes, and then creates the GitHub release from the generated notes. Conventional commit prefixes such as `feat:`, `fix:`, `perf:`, and `docs:` are recognized. A `!` marker or `BREAKING CHANGE` text is placed in the breaking-changes section. The workflow requires repository contents write permission, so only maintainers with appropriate Actions permissions can publish a release.
 
 ## License
 

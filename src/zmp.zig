@@ -81,7 +81,7 @@ pub fn parse(frame: []const u8) ParseError!Frame {
             result.id = try parseId(tokens.next() orelse return error.MissingField);
             result.subject = tokens.next() orelse return error.MissingField;
             try validateSubject(result.subject);
-            const payload_length = try std.fmt.parseInt(usize, tokens.next() orelse return error.MissingField, 10);
+            const payload_length = std.fmt.parseInt(usize, tokens.next() orelse return error.MissingField, 10) catch return error.InvalidLength;
             if (payload_length > max_payload_length) return error.PayloadTooLong;
             const payload_start = header_end + 2;
             if (frame.len -| payload_start != payload_length + 2) return error.InvalidLength;

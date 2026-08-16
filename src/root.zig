@@ -1,5 +1,10 @@
 const std = @import("std");
 
+// Compile and run the unified ZMP protocol tests with the shared library suite.
+test {
+    _ = @import("zmp.zig");
+}
+
 pub const max_topic_length: usize = 256;
 pub const max_payload_length: usize = 64 * 1024;
 pub const max_control_line_length: usize = 1024;

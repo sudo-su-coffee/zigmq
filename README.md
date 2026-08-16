@@ -4,6 +4,28 @@
 
 > zigmq is intentionally smaller than NATS. It is suitable for learning, experiments, and lightweight edge workloads. Use NATS when you need mature clustering, persistence, security, monitoring, and a broad client ecosystem.
 
+## Unified ZMP protocol — v0.2.0 direction
+
+zigmq is evolving toward **ZMP (Zig Message Protocol)**: one compact protocol for cloud services, IoT devices, and edge gateways. ZMP combines NATS-like low-latency publish/subscribe, request/reply, wildcard routing, and consumer groups with MQTT-like device sessions, retained state, explicit delivery modes, acknowledgements, expiry, and reconnect-oriented recovery.
+
+ZMP is a new lightweight protocol, not Redis compatibility and not a requirement to run separate NATS and MQTT brokers. The existing NATS and MQTT listeners remain compatibility surfaces; ZMP is the unified native API for new clients.
+
+```text
+ZMP/1 SUB fast factory.line1.temperature\r\n
+ZMP/1 PUB fast 42 factory.line1.temperature 4\r\ndata\r\n
+ZMP/1 OK PUB 42\r\n
+```
+
+The protocol uses a small CRLF header and a length-delimited payload. Its delivery modes are explicit:
+
+| Mode | Meaning in v0.2.0 |
+| --- | --- |
+| `fast` | Volatile, low-latency, at-most-once delivery |
+| `acked` | Reserved for the optional local durable stream and acknowledgement path |
+| `exact` | Reserved for a future deduplicated durable mode; not yet advertised as complete |
+
+The v0.2.0 implementation establishes the frame grammar, parser/encoder tests, protocol dispatch, subject subscriptions, bounded payloads, fast publish acknowledgements, and a benchmark path. Durable `acked` delivery, persistent sessions, and exactly-once semantics are deliberately staged rather than implied by the first protocol slice. See [`docs/ZMP_PROTOCOL.md`](docs/ZMP_PROTOCOL.md) and [`docs/ZMP_V0.2.0_PLAN.md`](docs/ZMP_V0.2.0_PLAN.md).
+
 ## Features
 
 | Capability | Behavior |
@@ -21,6 +43,7 @@
 | Authentication | Optional shared token using `--auth-token`; constant-time comparison and bounded pre-auth commands |
 | Safety limits | 1,024 clients, 1,024 subscriptions per client, 8 pre-auth commands per connection |
 | Stream file security | Durable stream files are created and chmodded to owner-only `0600` permissions |
+| ZMP mode | Native unified protocol: `HELLO`, `PUB`, `SUB`, `UNSUB`, `ACK`, `PING`, `PONG`, `BYE`; `fast` plus staged durable modes |
 | NATS mode | Small subset: `INFO`, `CONNECT`, `PUB`, `SUB`, `UNSUB`, `MSG`, `PING`, `PONG` |
 | CLI | Pure-Zig `server`, `pub`, `sub`, `ping`, `shell`, and `bench pub` commands |
 | Embedding | `libzigmq_core.so` exports subject helpers, hashing, and frame encoding for the Python ctypes bridge |
@@ -256,7 +279,14 @@ Run the local benchmark with:
 python3 scripts/benchmark.py --binary ./zig-out/bin/zigmq --messages 10000 --clients 100
 ```
 
-These figures are host-specific measurements, not performance guarantees. Larger payloads, multiple subscribers, authentication, TLS, storage, and constrained CPUs will reduce throughput.
+For the native unified protocol, start a ZMP listener and run the fast-path benchmark:
+
+```sh
+zig build run -- --protocol zmp --port 4222
+python3 scripts/benchmark_zmp.py --messages 10000 --subscribers 10 --payload-size 128
+```
+
+The ZMP benchmark reports publisher acknowledgement rate and total fan-out delivery rate. Run it with 16, 128, and 1,024-byte payloads, with 1, 10, and 50 subscribers, and save the commit, compiler, optimization mode, CPU, memory, and operating-system details alongside the results. These figures are host-specific measurements, not performance guarantees. Larger payloads, multiple subscribers, authentication, TLS, storage, and constrained CPUs will reduce throughput.
 
 ## Honest NATS comparison
 

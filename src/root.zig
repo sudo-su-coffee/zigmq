@@ -9,6 +9,7 @@ pub const max_clients: usize = 1024;
 pub const max_preauth_commands: usize = 8;
 pub const max_subscriptions_per_client: usize = 1024;
 pub const max_nats_subscriptions_per_client: usize = 1024;
+pub const max_mqtt_subscriptions_per_client: usize = 1024;
 
 pub const Publish = struct {
     topic: []const u8,

@@ -122,6 +122,18 @@ python3 scripts/benchmark.py --binary ./zig-out/bin/zigmq --messages 10000 --cli
 
 These figures are host-specific measurements, not performance guarantees. Larger payloads, multiple subscribers, authentication, TLS, storage, and constrained CPUs will reduce throughput.
 
+## Throughput optimization
+
+The broker maintains an exact-subject subscriber index and a compact wildcard subscription list. Publishing a message now looks up exact subscribers directly instead of scanning every connected client and every subscription. A per-publish generation marker also prevents duplicate delivery when the same client matches both an exact and wildcard subscription.
+
+On the same ReleaseFast localhost benchmark, the indexed routing branch measured approximately **23,200 publish acknowledgments per second** and **14,100 one-subscriber fan-out messages per second**, compared with a clean-main repeat baseline of approximately **18,700** and **12,000**, respectively. With 50 subscribers and 1,000 messages, broker throughput improved from approximately **1,723** to **1,785 messages per second** while total deliveries improved from approximately **86,145** to **89,266 deliveries per second**. See `performance_results.md` for the exact runs.
+
+For multi-subscriber testing, run:
+
+```sh
+python3 scripts/benchmark_fanout.py --binary ./zig-out/bin/zigmq --subscribers 50 --messages 1000
+```
+
 ## Project structure
 
 | Path | Purpose |
@@ -130,7 +142,9 @@ These figures are host-specific measurements, not performance guarantees. Larger
 | `src/main.zig` | TCP listener, client queues, routing, authentication, shutdown, and NATS subset |
 | `scripts/e2e_test.py` | Automated custom, authentication, wildcard, NATS, and shutdown tests |
 | `scripts/benchmark.py` | Local throughput and client-capacity benchmark |
+| `scripts/benchmark_fanout.py` | Multi-subscriber routing benchmark |
 | `benchmark_results.md` | Recorded sandbox baseline and interpretation |
+| `performance_results.md` | Main-versus-optimized throughput comparison |
 | `.github/workflows/ci.yml` | Zig 0.15.2 build and integration-test workflow |
 | `build.zig` | Zig build graph and test steps |
 | `build.zig.zon` | Package metadata with minimum Zig version pinned to 0.15.2 |

@@ -6,6 +6,7 @@ const zigmq = @import("zigmq");
 const Allocator = std.mem.Allocator;
 const Protocol = enum { custom, nats };
 const NatsSubscription = struct { subject: []u8, sid: []u8 };
+const WildcardSubscription = struct { pattern: []const u8, client: *Client };
 
 var stop_requested = std.atomic.Value(bool).init(false);
 
@@ -17,6 +18,7 @@ const Client = struct {
     queue: std.ArrayList([]u8) = .empty,
     queue_bytes: usize = 0,
     closed: bool = false,
+    last_delivery_generation: usize = 0,
     authenticated: bool = true,
     subscriptions: std.StringHashMap(void),
     nats_subscriptions: std.ArrayList(NatsSubscription) = .empty,
@@ -140,9 +142,19 @@ const Broker = struct {
     auth_token: ?[]const u8,
     mutex: std.Thread.Mutex = .{},
     clients: std.ArrayList(*Client) = .empty,
+    exact_subscribers: std.StringHashMap(std.ArrayList(*Client)),
+    wildcard_subscriptions: std.ArrayList(WildcardSubscription) = .empty,
+    delivery_generation: usize = 0,
 
     fn init(allocator: Allocator, protocol: Protocol, host: []const u8, port: u16, auth_token: ?[]const u8) Broker {
-        return .{ .allocator = allocator, .protocol = protocol, .host = host, .port = port, .auth_token = auth_token };
+        return .{
+            .allocator = allocator,
+            .protocol = protocol,
+            .host = host,
+            .port = port,
+            .auth_token = auth_token,
+            .exact_subscribers = std.StringHashMap(std.ArrayList(*Client)).init(allocator),
+        };
     }
 
     fn addClient(self: *Broker, client: *Client) !void {
@@ -162,7 +174,10 @@ const Broker = struct {
         defer self.mutex.unlock();
         self.removeClientLocked(client);
         var iterator = client.subscriptions.iterator();
-        while (iterator.next()) |entry| self.allocator.free(entry.key_ptr.*);
+        while (iterator.next()) |entry| {
+            self.removeIndexLocked(client, entry.key_ptr.*);
+            self.allocator.free(entry.key_ptr.*);
+        }
         client.subscriptions.clearRetainingCapacity();
         for (client.nats_subscriptions.items) |subscription| {
             self.allocator.free(subscription.subject);
@@ -178,20 +193,83 @@ const Broker = struct {
     }
 
     fn deinit(self: *Broker) void {
+        var exact_iterator = self.exact_subscribers.iterator();
+        while (exact_iterator.next()) |entry| {
+            entry.value_ptr.deinit(self.allocator);
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.exact_subscribers.deinit();
+        self.wildcard_subscriptions.deinit(self.allocator);
         self.clients.deinit(self.allocator);
+    }
+
+    fn isWildcard(pattern: []const u8) bool {
+        return std.mem.indexOfAny(u8, pattern, "*>") != null;
+    }
+
+    fn addIndexLocked(self: *Broker, client: *Client, pattern: []const u8) !void {
+        if (isWildcard(pattern)) {
+            try self.wildcard_subscriptions.append(self.allocator, .{ .pattern = client.subscriptions.getKey(pattern).?, .client = client });
+            return;
+        }
+        if (self.exact_subscribers.getPtr(pattern)) |list| {
+            try list.append(self.allocator, client);
+            return;
+        }
+        const key = try self.allocator.dupe(u8, pattern);
+        errdefer self.allocator.free(key);
+        var list: std.ArrayList(*Client) = .empty;
+        errdefer list.deinit(self.allocator);
+        try list.append(self.allocator, client);
+        try self.exact_subscribers.put(key, list);
+    }
+
+    fn removeIndexLocked(self: *Broker, client: *Client, pattern: []const u8) void {
+        if (isWildcard(pattern)) {
+            for (self.wildcard_subscriptions.items, 0..) |subscription, index| {
+                if (subscription.client == client and std.mem.eql(u8, subscription.pattern, pattern)) {
+                    _ = self.wildcard_subscriptions.swapRemove(index);
+                    return;
+                }
+            }
+            return;
+        }
+        if (self.exact_subscribers.getPtr(pattern)) |list| {
+            for (list.items, 0..) |subscriber, index| {
+                if (subscriber == client) {
+                    _ = list.swapRemove(index);
+                    break;
+                }
+            }
+            if (list.items.len == 0) {
+                const removed = self.exact_subscribers.fetchRemove(pattern).?;
+                var removed_list = removed.value;
+                removed_list.deinit(self.allocator);
+                self.allocator.free(removed.key);
+            }
+        }
+    }
+
+    fn deliverCustom(self: *Broker, client: *Client, topic: []const u8, payload: []const u8) void {
+        if (client.last_delivery_generation == self.delivery_generation) return;
+        client.last_delivery_generation = self.delivery_generation;
+        client.sendCustomMessage(topic, payload) catch |err| std.log.debug("custom delivery failed: {s}", .{@errorName(err)});
     }
 
     fn publish(self: *Broker, topic: []const u8, payload: []const u8) void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        for (self.clients.items) |client| {
-            var iterator = client.subscriptions.iterator();
-            while (iterator.next()) |entry| {
-                if (zigmq.subjectMatches(entry.key_ptr.*, topic)) {
-                    client.sendCustomMessage(topic, payload) catch |err| std.log.debug("custom delivery failed: {s}", .{@errorName(err)});
-                    break;
-                }
+        self.delivery_generation +%= 1;
+        if (self.delivery_generation == 0) self.delivery_generation = 1;
+        if (self.exact_subscribers.get(topic)) |list| {
+            for (list.items) |client| self.deliverCustom(client, topic, payload);
+        }
+        for (self.wildcard_subscriptions.items) |subscription| {
+            if (zigmq.subjectMatches(subscription.pattern, topic)) {
+                self.deliverCustom(subscription.client, topic, payload);
             }
+        }
+        for (self.clients.items) |client| {
             for (client.nats_subscriptions.items) |subscription| {
                 if (zigmq.subjectMatches(subscription.subject, topic)) {
                     client.sendNatsMessage(topic, subscription.sid, payload) catch |err| std.log.debug("nats delivery failed: {s}", .{@errorName(err)});
@@ -207,6 +285,11 @@ const Broker = struct {
         const copy = try self.allocator.dupe(u8, subject);
         errdefer self.allocator.free(copy);
         try client.subscriptions.put(copy, {});
+        errdefer {
+            const removed = client.subscriptions.fetchRemove(subject).?;
+            self.allocator.free(removed.key);
+        }
+        try self.addIndexLocked(client, subject);
         return true;
     }
 
@@ -214,6 +297,7 @@ const Broker = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         const removed = client.subscriptions.fetchRemove(subject) orelse return false;
+        self.removeIndexLocked(client, removed.key);
         self.allocator.free(removed.key);
         return true;
     }

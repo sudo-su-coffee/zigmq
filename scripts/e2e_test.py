@@ -58,13 +58,18 @@ def test_custom(binary: str, port: int) -> None:
 
         subscriber.sendall(b"SUB sensors.*\r\n")
         assert b"+OK SUB\r\n" in recv_until(subscriber, b"\r\n")
+        subscriber.sendall(b"SUB sensors.room1\r\n")
+        assert b"+OK SUB\r\n" in recv_until(subscriber, b"\r\n")
         publisher.sendall(b"PUB sensors.room1 21.5 C\r\n")
         assert b"+OK PUB\r\n" in recv_until(publisher, b"\r\n")
         delivered = recv_until(subscriber, b"\r\n21.5 C\r\n")
-        assert b"MSG sensors.room1 6\r\n21.5 C\r\n" in delivered
+        frame = b"MSG sensors.room1 6\r\n21.5 C\r\n"
+        assert delivered.count(frame) == 1
 
         publisher.sendall(b"PING\r\n")
         assert b"PONG\r\n" in recv_until(publisher, b"\r\n")
+        subscriber.sendall(b"UNSUB sensors.room1\r\n")
+        assert b"+OK UNSUB\r\n" in recv_until(subscriber, b"\r\n")
         subscriber.sendall(b"UNSUB sensors.*\r\n")
         assert b"+OK UNSUB\r\n" in recv_until(subscriber, b"\r\n")
     finally:

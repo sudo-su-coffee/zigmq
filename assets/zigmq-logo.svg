@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">zigmq logo</title>
+  <desc id="desc">Three connected message nodes joined by a zigzag route.</desc>
+  <rect width="512" height="512" rx="96" fill="#07133d"/>
+  <g fill="none" stroke="#19d3e8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M126 353 L250 256 L250 150"/>
+    <path d="M250 256 L386 353"/>
+  </g>
+  <g fill="#102b87" stroke="#19d3e8" stroke-width="16">
+    <circle cx="110" cy="368" r="54"/>
+    <circle cx="250" cy="112" r="54"/>
+    <circle cx="402" cy="368" r="54"/>
+  </g>
+  <g fill="#19d3e8">
+    <circle cx="110" cy="368" r="17"/>
+    <circle cx="250" cy="112" r="17"/>
+    <circle cx="402" cy="368" r="17"/>
+  </g>
+  <path d="M250 112 V256 L188 304" fill="none" stroke="#19d3e8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

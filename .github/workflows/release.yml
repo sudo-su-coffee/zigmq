@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release tag, for example v0.2.0"
+        description: "Release tag, for example v0.2.0-beta.1"
         required: true
         type: string
       target:
@@ -51,7 +51,7 @@ jobs:
           set -euo pipefail
           if [[ ! "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid release version: $RELEASE_VERSION"
-            echo "Use a semantic version such as v0.2.0 or v0.2.0-rc.1"
+            echo "Use a semantic version such as v0.2.0 or v0.2.0-beta.1"
             exit 1
           fi
           if git rev-parse --verify --quiet "refs/tags/$RELEASE_VERSION" >/dev/null; then
@@ -60,6 +60,25 @@ jobs:
           fi
           zig build test
           zig build -Doptimize=ReleaseFast
+          expected_version="${RELEASE_VERSION#v}"
+          actual_version="$(./zig-out/bin/zigmq --version | awk '{print $2}')"
+          if [[ "$actual_version" != "$expected_version" ]]; then
+            echo "Binary version $actual_version does not match release $expected_version"
+            exit 1
+          fi
+
+      - name: Package release build
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_VERSION#v}"
+          mkdir -p dist
+          cp zig-out/bin/zigmq dist/zigmq
+          cp README.md LICENSE dist/
+          tar -C dist -czf "zigmq-${version}-linux-x86_64.tar.gz" zigmq README.md LICENSE
+          sha256sum "zigmq-${version}-linux-x86_64.tar.gz" > "zigmq-${version}-linux-x86_64.tar.gz.sha256"
 
       - name: Generate categorized release notes
         env:
@@ -72,7 +91,13 @@ jobs:
           TARGET_SHA="$(git rev-parse HEAD)"
           PREVIOUS_TAG="$(git describe --tags --abbrev=0 "$TARGET_SHA" 2>/dev/null || true)"
           export TARGET_SHA PREVIOUS_TAG
-          bash .github/scripts/generate-release-notes.sh > release_notes.md
+          if [[ -f "docs/RELEASE_${RELEASE_VERSION#v}.md" ]]; then
+            cp "docs/RELEASE_${RELEASE_VERSION#v}.md" release_notes.md
+            printf '\n---\n\n## Commit summary\n\n' >> release_notes.md
+            bash .github/scripts/generate-release-notes.sh >> release_notes.md
+          else
+            bash .github/scripts/generate-release-notes.sh > release_notes.md
+          fi
           cat release_notes.md
 
       - name: Create GitHub release
@@ -88,4 +113,4 @@ jobs:
           if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
             args+=("--prerelease")
           fi
-          gh release create "${args[@]}"
+          gh release create "${args[@]}" dist/*.tar.gz dist/*.sha256

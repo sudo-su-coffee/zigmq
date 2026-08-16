@@ -1,5 +1,7 @@
 const std = @import("std");
 
+pub const version = "0.2.0-beta.1";
+
 pub const max_topic_length: usize = 256;
 pub const max_payload_length: usize = 64 * 1024;
 pub const max_control_line_length: usize = 1024;

@@ -5,18 +5,54 @@ const zigmq = @import("zigmq");
 const cli = @import("cli.zig");
 
 const Allocator = std.mem.Allocator;
-const Protocol = enum { custom, nats };
+const Protocol = enum { custom, nats, mqtt };
 const NatsSubscription = struct { subject: []u8, sid: []u8 };
 const NatsSubscriptionRef = struct { subject: []const u8, sid: []const u8, client: *Client };
+const MqttSubscription = struct { filter: []u8, client: *Client };
 const RetainedMessage = struct { payload: []u8, expires_at_ns: i128 };
 const WildcardSubscription = struct { pattern: []const u8, client: *Client };
 const GroupSubscription = struct { pattern: []const u8, group: []const u8, client: *Client };
+
+fn mqttEncodeRemainingLength(value: usize, output: *[4]u8) usize {
+    var remaining = value;
+    var index: usize = 0;
+    while (true) {
+        var encoded = @as(u8, @intCast(remaining % 128));
+        remaining /= 128;
+        if (remaining != 0) encoded |= 128;
+        output[index] = encoded;
+        index += 1;
+        if (remaining == 0) return index;
+    }
+}
+
+fn mqttTopicMatches(filter: []const u8, topic: []const u8) bool {
+    var filter_start: usize = 0;
+    var topic_start: usize = 0;
+    while (true) {
+        const filter_relative_end = std.mem.indexOfScalar(u8, filter[filter_start..], '/') orelse filter.len - filter_start;
+        const filter_end = filter_start + filter_relative_end;
+        const filter_level = filter[filter_start..filter_end];
+        if (std.mem.eql(u8, filter_level, "#")) return true;
+        if (topic_start >= topic.len) return false;
+        const topic_relative_end = std.mem.indexOfScalar(u8, topic[topic_start..], '/') orelse topic.len - topic_start;
+        const topic_end = topic_start + topic_relative_end;
+        const topic_level = topic[topic_start..topic_end];
+        if (!std.mem.eql(u8, filter_level, "+") and !std.mem.eql(u8, filter_level, topic_level)) return false;
+        const filter_done = filter_end == filter.len;
+        const topic_done = topic_end == topic.len;
+        if (filter_done or topic_done) return filter_done and topic_done;
+        filter_start = filter_end + 1;
+        topic_start = topic_end + 1;
+    }
+}
 
 var stop_requested = std.atomic.Value(bool).init(false);
 
 const Client = struct {
     stream: net.Stream,
     allocator: Allocator,
+    authenticated: bool,
     queue_mutex: std.Thread.Mutex = .{},
     queue_condition: std.Thread.Condition = .{},
     queue: std.ArrayList([]u8) = .empty,
@@ -25,10 +61,12 @@ const Client = struct {
     queue_bytes: usize = 0,
     closed: bool = false,
     last_delivery_generation: usize = 0,
-    authenticated: bool = true,
+    preauth_commands: usize = 0,
+    mqtt_connected: bool = false,
     verbose: bool = true,
     subscriptions: std.StringHashMap(?[]u8),
     nats_subscriptions: std.ArrayList(NatsSubscription) = .empty,
+    mqtt_subscriptions: std.ArrayList([]u8) = .empty,
 
     fn init(stream: net.Stream, allocator: Allocator, authenticated: bool) Client {
         return .{
@@ -99,6 +137,26 @@ const Client = struct {
         return self.enqueueOwned(message);
     }
 
+    fn sendMqttPublish(self: *Client, topic: []const u8, payload: []const u8, retain: bool) !void {
+        var length_bytes: [4]u8 = undefined;
+        const remaining_length = 2 + topic.len + payload.len;
+        const length_size = mqttEncodeRemainingLength(remaining_length, &length_bytes);
+        const message = try self.allocator.alloc(u8, 1 + length_size + remaining_length);
+        errdefer self.allocator.free(message);
+        message[0] = if (retain) 0x31 else 0x30;
+        @memcpy(message[1 .. 1 + length_size], length_bytes[0..length_size]);
+        std.mem.writeInt(u16, message[1 + length_size ..][0..2], @as(u16, @intCast(topic.len)), .big);
+        @memcpy(message[1 + length_size + 2 ..][0..topic.len], topic);
+        @memcpy(message[1 + length_size + 2 + topic.len ..], payload);
+        return self.enqueueOwned(message);
+    }
+
+    fn sendMqttAck(self: *Client, packet_type: u8, packet_id: u16) !void {
+        var message = [_]u8{ packet_type, 0x02, 0, 0 };
+        std.mem.writeInt(u16, message[2..4], packet_id, .big);
+        return self.send(&message);
+    }
+
     fn sendNatsMessage(self: *Client, subject: []const u8, sid: []const u8, payload: []const u8) !void {
         var header: [512]u8 = undefined;
         const header_bytes = try std.fmt.bufPrint(&header, "MSG {s} {s} {d}\r\n", .{ subject, sid, payload.len });
@@ -154,6 +212,8 @@ const Client = struct {
             self.allocator.free(subscription.sid);
         }
         self.nats_subscriptions.deinit(self.allocator);
+        for (self.mqtt_subscriptions.items) |filter| self.allocator.free(filter);
+        self.mqtt_subscriptions.deinit(self.allocator);
     }
 };
 
@@ -179,6 +239,7 @@ const Broker = struct {
     group_subscriptions: std.ArrayList(GroupSubscription) = .empty,
     nats_subscribers: std.StringHashMap(std.ArrayList(NatsSubscriptionRef)),
     nats_wildcard_subscriptions: std.ArrayList(NatsSubscriptionRef) = .empty,
+    mqtt_subscriptions: std.ArrayList(MqttSubscription) = .empty,
     retained: std.StringHashMap(RetainedMessage),
     stream_file: ?std.fs.File = null,
     stream_sequence: u64 = 0,
@@ -254,6 +315,11 @@ const Broker = struct {
             self.allocator.free(subscription.sid);
         }
         client.nats_subscriptions.clearRetainingCapacity();
+        for (client.mqtt_subscriptions.items) |filter| {
+            self.removeMqttSubscriptionLocked(client, filter);
+            self.allocator.free(filter);
+        }
+        client.mqtt_subscriptions.clearRetainingCapacity();
     }
 
     fn closeAll(self: *Broker) void {
@@ -278,6 +344,7 @@ const Broker = struct {
         }
         self.nats_subscribers.deinit();
         self.nats_wildcard_subscriptions.deinit(self.allocator);
+        self.mqtt_subscriptions.deinit(self.allocator);
         var retained_iterator = self.retained.iterator();
         while (retained_iterator.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
@@ -480,6 +547,66 @@ const Broker = struct {
         }
     }
 
+    fn removeMqttSubscriptionLocked(self: *Broker, client: *Client, filter: []const u8) void {
+        for (self.mqtt_subscriptions.items, 0..) |subscription, index| {
+            if (subscription.client == client and std.mem.eql(u8, subscription.filter, filter)) {
+                _ = self.mqtt_subscriptions.swapRemove(index);
+                return;
+            }
+        }
+    }
+
+    fn mqttSubscribe(self: *Broker, client: *Client, filter: []const u8) !bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (client.mqtt_subscriptions.items.len >= zigmq.max_mqtt_subscriptions_per_client) return error.TooManySubscriptions;
+        for (client.mqtt_subscriptions.items) |existing| {
+            if (std.mem.eql(u8, existing, filter)) return false;
+        }
+        const copy = try self.allocator.dupe(u8, filter);
+        errdefer self.allocator.free(copy);
+        try client.mqtt_subscriptions.append(self.allocator, copy);
+        errdefer _ = client.mqtt_subscriptions.pop();
+        try self.mqtt_subscriptions.append(self.allocator, .{ .filter = copy, .client = client });
+        return true;
+    }
+
+    fn mqttUnsubscribe(self: *Broker, client: *Client, filter: []const u8) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        for (client.mqtt_subscriptions.items, 0..) |existing, index| {
+            if (std.mem.eql(u8, existing, filter)) {
+                _ = client.mqtt_subscriptions.swapRemove(index);
+                self.removeMqttSubscriptionLocked(client, filter);
+                self.allocator.free(existing);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn deliverMqttRetainedLocked(self: *Broker, client: *Client, filter: []const u8) void {
+        const now = std.time.nanoTimestamp();
+        var iterator = self.retained.iterator();
+        while (iterator.next()) |entry| {
+            const message = entry.value_ptr.*;
+            if (message.expires_at_ns != 0 and now >= message.expires_at_ns) continue;
+            if (mqttTopicMatches(filter, entry.key_ptr.*)) {
+                client.sendMqttPublish(entry.key_ptr.*, message.payload, true) catch |err| std.log.debug("mqtt retained delivery failed: {s}", .{@errorName(err)});
+            }
+        }
+    }
+
+    fn publishMqtt(self: *Broker, topic: []const u8, payload: []const u8) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        for (self.mqtt_subscriptions.items) |subscription| {
+            if (mqttTopicMatches(subscription.filter, topic)) {
+                subscription.client.sendMqttPublish(topic, payload, false) catch |err| std.log.debug("mqtt delivery failed: {s}", .{@errorName(err)});
+            }
+        }
+    }
+
     fn setRetained(self: *Broker, topic: []const u8, payload: []const u8, ttl_ms: u64) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -621,6 +748,7 @@ fn parseErrorText(err: zigmq.ParseError) []const u8 {
 fn parseProtocol(text: []const u8) !Protocol {
     if (std.mem.eql(u8, text, "custom")) return .custom;
     if (std.mem.eql(u8, text, "nats")) return .nats;
+    if (std.mem.eql(u8, text, "mqtt")) return .mqtt;
     return error.InvalidProtocol;
 }
 
@@ -638,6 +766,80 @@ fn readLine(reader: *net.Stream.Reader) !?[]const u8 {
         error.StreamTooLong => return error.LineTooLong,
         error.ReadFailed => return error.ReadFailed,
     };
+}
+
+const MqttPacket = struct { first: u8, body: []u8 };
+
+fn mqttDecodeRemainingLength(reader: *net.Stream.Reader) !usize {
+    var value: usize = 0;
+    var multiplier: usize = 1;
+    var count: usize = 0;
+    while (count < 4) : (count += 1) {
+        const encoded = try reader.interface().takeByte();
+        value += @as(usize, encoded & 127) * multiplier;
+        if ((encoded & 128) == 0) return value;
+        multiplier *= 128;
+    }
+    return error.InvalidMqttLength;
+}
+
+fn readMqttPacket(reader: *net.Stream.Reader, allocator: Allocator) !MqttPacket {
+    const first = try reader.interface().takeByte();
+    const remaining_length = try mqttDecodeRemainingLength(reader);
+    if (remaining_length > zigmq.max_payload_length + zigmq.max_topic_length + 1024) return error.MqttPacketTooLarge;
+    const body = try allocator.alloc(u8, remaining_length);
+    errdefer allocator.free(body);
+    if (remaining_length > 0) try reader.interface().readSliceAll(body);
+    return .{ .first = first, .body = body };
+}
+
+fn mqttReadU16(body: []const u8, index: *usize) !u16 {
+    if (body.len -| index.* < 2) return error.InvalidMqttPacket;
+    const value = std.mem.readInt(u16, body[index.*..][0..2], .big);
+    index.* += 2;
+    return value;
+}
+
+fn mqttReadBytes(body: []const u8, index: *usize) ![]const u8 {
+    const length = try mqttReadU16(body, index);
+    if (body.len -| index.* < length) return error.InvalidMqttPacket;
+    const value = body[index.*..][0..length];
+    index.* += length;
+    return value;
+}
+
+fn mqttValidateTopicName(topic: []const u8) !void {
+    if (topic.len == 0 or topic.len > zigmq.max_topic_length) return error.InvalidMqttTopic;
+    if (std.mem.indexOfAny(u8, topic, "#+\x00") != null) return error.InvalidMqttTopic;
+}
+
+fn mqttValidateFilter(filter: []const u8) !void {
+    if (filter.len == 0 or filter.len > zigmq.max_topic_length) return error.InvalidMqttFilter;
+    var start: usize = 0;
+    while (true) {
+        const relative_end = std.mem.indexOfScalar(u8, filter[start..], '/') orelse filter.len - start;
+        const end = start + relative_end;
+        const level = filter[start..end];
+        if (std.mem.indexOfScalar(u8, level, '#')) |position| {
+            if (!std.mem.eql(u8, level, "#") or end != filter.len or position != 0) return error.InvalidMqttFilter;
+        }
+        if (std.mem.indexOfScalar(u8, level, '+')) |position| {
+            if (!std.mem.eql(u8, level, "+") or position != 0) return error.InvalidMqttFilter;
+        }
+        if (end == filter.len) return;
+        start = end + 1;
+    }
+}
+
+fn mqttSendFixed(client: *Client, first: u8, body: []const u8) !void {
+    var length_bytes: [4]u8 = undefined;
+    const length_size = mqttEncodeRemainingLength(body.len, &length_bytes);
+    const packet = try client.allocator.alloc(u8, 1 + length_size + body.len);
+    errdefer client.allocator.free(packet);
+    packet[0] = first;
+    @memcpy(packet[1 .. 1 + length_size], length_bytes[0..length_size]);
+    @memcpy(packet[1 + length_size ..], body);
+    return client.enqueueOwned(packet);
 }
 
 fn readNatsPayload(reader: *net.Stream.Reader, allocator: Allocator, length: usize) ![]u8 {
@@ -808,6 +1010,153 @@ fn natsInfo(broker: *Broker, client: *Client) !void {
     try client.sendFmt("INFO {{\"server_id\":\"zigmq\",\"server_name\":\"zigmq\",\"version\":\"0.2.0\",\"proto\":1,\"host\":\"{s}\",\"port\":{d},\"headers\":false,\"max_payload\":{d},\"auth_required\":{s}}}\r\n", .{ broker.host, broker.port, zigmq.max_payload_length, auth_required });
 }
 
+fn mqttConnack(client: *Client, return_code: u8) !void {
+    const body = [_]u8{ 0, return_code };
+    try mqttSendFixed(client, 0x20, &body);
+}
+
+fn mqttConnackDirect(client: *Client, return_code: u8) !void {
+    const packet = [_]u8{ 0x20, 0x02, 0x00, return_code };
+    try client.stream.writeAll(&packet);
+}
+
+fn mqttSuback(client: *Client, packet_id: u16, codes: []const u8) !void {
+    const body = try client.allocator.alloc(u8, 2 + codes.len);
+    defer client.allocator.free(body);
+    std.mem.writeInt(u16, body[0..2], packet_id, .big);
+    @memcpy(body[2..], codes);
+    try mqttSendFixed(client, 0x90, body);
+}
+
+fn mqttUnsuback(client: *Client, packet_id: u16) !void {
+    var body: [2]u8 = undefined;
+    std.mem.writeInt(u16, &body, packet_id, .big);
+    try mqttSendFixed(client, 0xB0, &body);
+}
+
+fn handleMqttConnect(broker: *Broker, client: *Client, body: []const u8) !bool {
+    if (client.mqtt_connected) return false;
+    var index: usize = 0;
+    const protocol_name = try mqttReadBytes(body, &index);
+    if (!std.mem.eql(u8, protocol_name, "MQTT")) {
+        try mqttConnackDirect(client, 0x01);
+        return false;
+    }
+    if (body.len -| index < 4) return error.InvalidMqttPacket;
+    const protocol_level = body[index];
+    index += 1;
+    const connect_flags = body[index];
+    index += 1;
+    _ = try mqttReadU16(body, &index);
+    if (protocol_level != 4 or (connect_flags & 0x01) != 0 or (connect_flags & 0x1C) != 0) {
+        try mqttConnackDirect(client, 0x01);
+        return false;
+    }
+    _ = try mqttReadBytes(body, &index);
+    const username = if ((connect_flags & 0x80) != 0) try mqttReadBytes(body, &index) else null;
+    const password = if ((connect_flags & 0x40) != 0) try mqttReadBytes(body, &index) else null;
+    if (index != body.len) return error.InvalidMqttPacket;
+    if (broker.auth_token) |expected| {
+        const credential = password orelse username orelse {
+            try mqttConnackDirect(client, 0x04);
+            return false;
+        };
+        if (!std.mem.eql(u8, credential, expected)) {
+            try mqttConnackDirect(client, 0x04);
+            return false;
+        }
+    }
+    client.mqtt_connected = true;
+    client.authenticated = true;
+    try mqttConnack(client, 0x00);
+    return true;
+}
+
+fn handleMqttSubscribe(broker: *Broker, client: *Client, body: []const u8) !bool {
+    var index: usize = 0;
+    const packet_id = try mqttReadU16(body, &index);
+    var codes: std.ArrayList(u8) = .empty;
+    defer codes.deinit(client.allocator);
+    var retained_filters: std.ArrayList([]const u8) = .empty;
+    defer retained_filters.deinit(client.allocator);
+    while (index < body.len) {
+        const filter = try mqttReadBytes(body, &index);
+        if (index >= body.len) return error.InvalidMqttPacket;
+        const requested_qos = body[index];
+        index += 1;
+        mqttValidateFilter(filter) catch {
+            try codes.append(client.allocator, 0x80);
+            continue;
+        };
+        if (requested_qos > 0) {
+            try codes.append(client.allocator, 0x80);
+            continue;
+        }
+        _ = broker.mqttSubscribe(client, filter) catch |err| {
+            try codes.append(client.allocator, if (err == error.TooManySubscriptions) 0x97 else 0x80);
+            continue;
+        };
+        try codes.append(client.allocator, 0x00);
+        try retained_filters.append(client.allocator, filter);
+    }
+    if (codes.items.len == 0) return error.InvalidMqttPacket;
+    try mqttSuback(client, packet_id, codes.items);
+    broker.mutex.lock();
+    defer broker.mutex.unlock();
+    for (retained_filters.items) |filter| broker.deliverMqttRetainedLocked(client, filter);
+    return true;
+}
+
+fn handleMqttUnsubscribe(broker: *Broker, client: *Client, body: []const u8) !bool {
+    var index: usize = 0;
+    const packet_id = try mqttReadU16(body, &index);
+    while (index < body.len) {
+        const filter = try mqttReadBytes(body, &index);
+        _ = broker.mqttUnsubscribe(client, filter);
+    }
+    if (index != body.len) return error.InvalidMqttPacket;
+    try mqttUnsuback(client, packet_id);
+    return true;
+}
+
+fn handleMqttPublish(broker: *Broker, client: *Client, first: u8, body: []const u8) !bool {
+    _ = client;
+    const qos = (first >> 1) & 0x03;
+    if (qos != 0) return error.UnsupportedMqttQos;
+    var index: usize = 0;
+    const topic = try mqttReadBytes(body, &index);
+    try mqttValidateTopicName(topic);
+    const payload = body[index..];
+    if (payload.len > zigmq.max_payload_length) return error.PayloadTooLong;
+    if ((first & 0x01) != 0) try broker.setRetained(topic, payload, 0);
+    broker.publishCustom(topic, payload, null);
+    broker.publishMqtt(topic, payload);
+    return true;
+}
+
+fn handleMqttCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader) bool {
+    const packet = readMqttPacket(reader, broker.allocator) catch return false;
+    defer broker.allocator.free(packet.body);
+    const packet_type = packet.first >> 4;
+    const flags = packet.first & 0x0F;
+    if (!client.mqtt_connected) {
+        if (packet_type != 1 or flags != 0) return false;
+        return handleMqttConnect(broker, client, packet.body) catch false;
+    }
+    return switch (packet_type) {
+        3 => if (flags & 0x08 != 0) false else handleMqttPublish(broker, client, packet.first, packet.body) catch false,
+        8 => if (flags != 2) false else handleMqttSubscribe(broker, client, packet.body) catch false,
+        10 => if (flags != 2) false else handleMqttUnsubscribe(broker, client, packet.body) catch false,
+        12 => blk: {
+            if (packet.body.len != 0 or flags != 0) break :blk false;
+            mqttSendFixed(client, 0xD0, &[_]u8{}) catch break :blk false;
+            break :blk true;
+        },
+        14 => packet.body.len == 0 and flags == 0,
+        else => false,
+    };
+}
+
 fn handleClient(broker: *Broker, stream: net.Stream) void {
     const initially_authenticated = broker.auth_token == null;
     var client = Client.init(stream, broker.allocator, initially_authenticated);
@@ -821,21 +1170,25 @@ fn handleClient(broker: *Broker, stream: net.Stream) void {
 
     if (broker.protocol == .nats) {
         natsInfo(broker, &client) catch return;
-    } else {
+    } else if (broker.protocol == .custom) {
         client.send(if (initially_authenticated) "+OK zigmq ready\r\n" else "+OK zigmq ready auth=required\r\n") catch return;
     }
 
     var input_buffer: [zigmq.max_control_line_length + 1]u8 = undefined;
     var reader = stream.reader(&input_buffer);
     while (!stop_requested.load(.seq_cst)) {
-        const line = readLine(&reader) catch |err| {
-            if (err == error.LineTooLong) client.send("-ERR command line too long\r\n") catch {};
-            break;
-        } orelse break;
-        const keep_running = if (broker.protocol == .nats)
-            handleNatsCommand(broker, &client, &reader, line)
-        else
-            handleCustomCommand(broker, &client, line);
+        const keep_running = if (broker.protocol == .mqtt) blk: {
+            break :blk handleMqttCommand(broker, &client, &reader);
+        } else blk: {
+            const line = readLine(&reader) catch |err| {
+                if (err == error.LineTooLong) client.send("-ERR command line too long\r\n") catch {};
+                break :blk false;
+            } orelse break :blk false;
+            break :blk if (broker.protocol == .nats)
+                handleNatsCommand(broker, &client, &reader, line)
+            else
+                handleCustomCommand(broker, &client, line);
+        };
         if (!keep_running) break;
     }
     client.requestClose();
@@ -867,6 +1220,7 @@ pub fn main() !void {
     }
     var host: []const u8 = "127.0.0.1";
     var port: u16 = 4222;
+    var port_explicit = false;
     var protocol: Protocol = .custom;
     var auth_token: ?[]const u8 = null;
     var stream_path: ?[]const u8 = null;
@@ -880,6 +1234,7 @@ pub fn main() !void {
             index += 1;
             if (index >= args.len) return error.MissingPort;
             port = try parsePort(args[index]);
+            port_explicit = true;
         } else if (std.mem.eql(u8, args[index], "--protocol")) {
             index += 1;
             if (index >= args.len) return error.MissingProtocol;
@@ -893,7 +1248,7 @@ pub fn main() !void {
             if (index >= args.len or args[index].len == 0) return error.MissingStreamPath;
             stream_path = args[index];
         } else if (std.mem.eql(u8, args[index], "--help")) {
-            std.debug.print("Usage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats] [--auth-token token] [--stream path]\n", .{});
+            std.debug.print("Usage: zigmq [--host 127.0.0.1] [--port 4222|1883] [--protocol custom|nats|mqtt] [--auth-token token] [--stream path]\n", .{});
             return;
         } else {
             std.debug.print("Unknown argument: {s}\n", .{args[index]});
@@ -901,6 +1256,7 @@ pub fn main() !void {
         }
     }
 
+    if (!port_explicit and protocol == .mqtt) port = 1883;
     stop_requested.store(false, .seq_cst);
     installSignalHandlers();
     const address = try net.Address.parseIp4(host, port);

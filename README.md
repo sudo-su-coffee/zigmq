@@ -168,6 +168,39 @@ The token is intentionally simple and is not a replacement for TLS or a full ide
 
 The server handles `SIGINT` and `SIGTERM`. It stops accepting new clients, wakes active connections, joins client threads, releases queued messages, and exits cleanly. This makes it suitable for a small service manager or container lifecycle.
 
+## Standard MQTT compatibility
+
+ZigMQ also provides an initial standard MQTT 3.1.1 listener. Start it on the conventional MQTT TCP port with:
+
+```sh
+zig build run -- --protocol mqtt
+```
+
+The default URL is:
+
+```text
+mqtt://127.0.0.1:1883
+```
+
+For MQTTX or MQTT Explorer, create a connection with the following values:
+
+| Setting | Value |
+| --- | --- |
+| Host | `127.0.0.1` |
+| Port | `1883` |
+| Protocol | MQTT 3.1.1 |
+| Transport | TCP |
+| Client ID | Any unique value, such as `mqttx-zigmq-1` |
+| Username | Optional; use `zigmq` when authentication is enabled |
+| Password | Optional; the value configured by `--auth-token` or `--auth-token-file` |
+| TLS/SSL | Disabled for the current listener; use a trusted private network only |
+
+The first compatibility slice supports `CONNECT`, `CONNACK`, QoS 0 `PUBLISH`, `SUBSCRIBE`, `SUBACK`, `UNSUBSCRIBE`, `UNSUBACK`, `PINGREQ`, `PINGRESP`, and `DISCONNECT`. MQTT topic names use `/` separators and support `+` and `#` filters. MQTT retained PUBLISH packets are mapped to ZigMQ retained state and are delivered with the MQTT retain flag when a matching subscriber connects.
+
+A standard MQTT UI can therefore publish `sensors/room-1/temperature`, subscribe to `sensors/+/temperature`, browse retained state, and monitor live messages. This listener is separate from the custom text protocol on port 4222 and the NATS-compatible subset. The current slice intentionally rejects QoS 1/2, Will messages, persistent sessions, MQTT-over-WebSocket, and TLS. Use `mqtt://`, not `mqtts://` or a WebSocket URL, until those transports are implemented.
+
+The official MQTT 3.1.1 specification defines the binary Control Packet format and QoS levels; MQTTX and MQTT Explorer are external clients that speak that protocol. See the [OASIS MQTT 3.1.1 specification](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html), [MQTTX](https://mqttx.app/), and [MQTT Explorer](http://mqtt-explorer.com/).
+
 ## NATS-compatible subset
 
 Run the compact NATS mode with:
@@ -274,6 +307,8 @@ python3 scripts/benchmark_fanout.py --binary ./zig-out/bin/zigmq --subscribers 5
 | `scripts/benchmark.py` | Local throughput and client-capacity benchmark |
 | `scripts/benchmark_fanout.py` | Multi-subscriber routing benchmark |
 | `scripts/compare_nats.py` | Controlled NATS-compatible comparison harness |
+| `scripts/mqtt_compat_test.py` | Standard MQTT 3.1.1 QoS-0 interoperability test |
+| `mqtt_ui_compatibility_sources.md` | Redis/MQTT UI and protocol compatibility research notes |
 | `scripts/nats_index_test.py` | Exact-index, wildcard, unsubscribe, and disconnect regression test |
 | `scripts/format_nats_matrix.py` | Reproducible formatter for raw comparison logs |
 | `comparison_results.md` | Captured ZigMQ versus NATS matrix and interpretation |

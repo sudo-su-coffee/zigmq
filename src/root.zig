@@ -5,6 +5,7 @@ pub const max_payload_length: usize = 64 * 1024;
 pub const max_control_line_length: usize = 1024;
 pub const max_queue_messages: usize = 32;
 pub const max_queue_bytes: usize = 256 * 1024;
+pub const max_mqtt_subscriptions_per_client: usize = 1024;
 
 pub const Publish = struct {
     topic: []const u8,

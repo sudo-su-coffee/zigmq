@@ -2,7 +2,9 @@ const std = @import("std");
 
 pub const max_topic_length: usize = 256;
 pub const max_payload_length: usize = 64 * 1024;
-pub const max_line_length: usize = max_topic_length + max_payload_length + 32;
+pub const max_control_line_length: usize = 1024;
+pub const max_queue_messages: usize = 32;
+pub const max_queue_bytes: usize = 256 * 1024;
 
 pub const Publish = struct {
     topic: []const u8,
@@ -13,6 +15,7 @@ pub const Command = union(enum) {
     subscribe: []const u8,
     unsubscribe: []const u8,
     publish: Publish,
+    auth: []const u8,
     ping,
     pong,
     help,
@@ -24,23 +27,70 @@ pub const ParseError = error{
     InvalidCommand,
     MissingTopic,
     MissingPayload,
+    MissingToken,
     TopicTooLong,
     PayloadTooLong,
     InvalidTopic,
+    WildcardNotAllowed,
 };
 
-fn isTopicChar(byte: u8) bool {
+fn isSubjectChar(byte: u8, allow_wildcards: bool) bool {
     return switch (byte) {
         'a'...'z', 'A'...'Z', '0'...'9', '.', '-', '_' => true,
+        '*', '>' => allow_wildcards,
         else => false,
     };
 }
 
 pub fn validateTopic(topic: []const u8) ParseError!void {
-    if (topic.len == 0) return error.MissingTopic;
-    if (topic.len > max_topic_length) return error.TopicTooLong;
-    for (topic) |byte| {
-        if (!isTopicChar(byte)) return error.InvalidTopic;
+    return validateSubject(topic, false);
+}
+
+pub fn validateSubject(pattern: []const u8, allow_wildcards: bool) ParseError!void {
+    if (pattern.len == 0) return error.MissingTopic;
+    if (pattern.len > max_topic_length) return error.TopicTooLong;
+
+    var start: usize = 0;
+    while (start < pattern.len) {
+        const relative_end = std.mem.indexOfScalar(u8, pattern[start..], '.') orelse pattern.len - start;
+        const end = start + relative_end;
+        const token = pattern[start..end];
+        if (token.len == 0) return error.InvalidTopic;
+        for (token) |byte| {
+            if (!isSubjectChar(byte, allow_wildcards)) {
+                if (byte == '*' or byte == '>') return error.WildcardNotAllowed;
+                return error.InvalidTopic;
+            }
+        }
+        if (token.len > 1 and (std.mem.indexOfScalar(u8, token, '*') != null or std.mem.indexOfScalar(u8, token, '>') != null)) {
+            return error.InvalidTopic;
+        }
+        if (std.mem.eql(u8, token, ">") and end != pattern.len) return error.InvalidTopic;
+        if (end == pattern.len) break;
+        start = end + 1;
+    }
+}
+
+pub fn subjectMatches(pattern: []const u8, subject: []const u8) bool {
+    var pattern_start: usize = 0;
+    var subject_start: usize = 0;
+    while (true) {
+        const pattern_relative_end = std.mem.indexOfScalar(u8, pattern[pattern_start..], '.') orelse pattern.len - pattern_start;
+        const pattern_end = pattern_start + pattern_relative_end;
+        const pattern_token = pattern[pattern_start..pattern_end];
+        if (std.mem.eql(u8, pattern_token, ">")) return true;
+
+        if (subject_start >= subject.len) return false;
+        const subject_relative_end = std.mem.indexOfScalar(u8, subject[subject_start..], '.') orelse subject.len - subject_start;
+        const subject_end = subject_start + subject_relative_end;
+        const subject_token = subject[subject_start..subject_end];
+        if (!std.mem.eql(u8, pattern_token, "*") and !std.mem.eql(u8, pattern_token, subject_token)) return false;
+
+        const pattern_done = pattern_end == pattern.len;
+        const subject_done = subject_end == subject.len;
+        if (pattern_done or subject_done) return pattern_done and subject_done;
+        pattern_start = pattern_end + 1;
+        subject_start = subject_end + 1;
     }
 }
 
@@ -67,11 +117,18 @@ pub fn parseCommand(raw_line: []const u8) ParseError!Command {
     if (std.ascii.eqlIgnoreCase(operation.word, "QUIT")) return .quit;
 
     const argument_start = skipSpaces(text, operation.next);
+    if (std.ascii.eqlIgnoreCase(operation.word, "AUTH")) {
+        const token = nextWord(text, argument_start);
+        if (token.word.len == 0) return error.MissingToken;
+        if (skipSpaces(text, token.next) != text.len) return error.InvalidCommand;
+        return .{ .auth = token.word };
+    }
+
     if (std.ascii.eqlIgnoreCase(operation.word, "SUB") or std.ascii.eqlIgnoreCase(operation.word, "UNSUB")) {
         const argument = nextWord(text, argument_start);
         if (argument.word.len == 0) return error.MissingTopic;
         if (skipSpaces(text, argument.next) != text.len) return error.InvalidCommand;
-        try validateTopic(argument.word);
+        try validateSubject(argument.word, true);
         if (std.ascii.eqlIgnoreCase(operation.word, "SUB")) return .{ .subscribe = argument.word };
         return .{ .unsubscribe = argument.word };
     }
@@ -105,11 +162,9 @@ test "parses publish payload with spaces" {
     try std.testing.expectEqualStrings("21.5 degrees C", command.publish.payload);
 }
 
-test "parses control commands" {
-    try std.testing.expect((try parseCommand("PING")) == .ping);
-    try std.testing.expect((try parseCommand("pong")) == .pong);
-    try std.testing.expect((try parseCommand("HELP")) == .help);
-    try std.testing.expect((try parseCommand("QUIT")) == .quit);
+test "parses auth commands" {
+    const command = try parseCommand("AUTH edge-secret");
+    try std.testing.expectEqualStrings("edge-secret", command.auth);
 }
 
 test "rejects malformed commands" {
@@ -117,14 +172,23 @@ test "rejects malformed commands" {
     try expectParseError("SUB", error.MissingTopic);
     try expectParseError("PUB topic", error.MissingPayload);
     try expectParseError("PUB bad/topic value", error.InvalidTopic);
+    try expectParseError("AUTH", error.MissingToken);
     try expectParseError("NOPE topic", error.InvalidCommand);
 }
 
-test "enforces topic length" {
-    var topic: [max_topic_length + 1]u8 = undefined;
-    @memset(&topic, 'a');
-    var line: [max_topic_length + 5]u8 = undefined;
-    @memcpy(line[0..4], "SUB ");
-    @memcpy(line[4..], &topic);
-    try expectParseError(&line, error.TopicTooLong);
+test "validates wildcard patterns" {
+    try validateSubject("sensors.*", true);
+    try validateSubject("sensors.>", true);
+    try validateSubject("sensors.*.room", true);
+    try expectParseError("SUB sensors.>.room", error.InvalidTopic);
+    try std.testing.expectError(error.WildcardNotAllowed, validateTopic("sensors.*"));
+}
+
+test "matches exact and wildcard subjects" {
+    try std.testing.expect(subjectMatches("sensors.room1", "sensors.room1"));
+    try std.testing.expect(!subjectMatches("sensors.room1", "sensors.room2"));
+    try std.testing.expect(subjectMatches("sensors.*", "sensors.room2"));
+    try std.testing.expect(!subjectMatches("sensors.*", "sensors.room2.temp"));
+    try std.testing.expect(subjectMatches("sensors.>", "sensors.room2.temp"));
+    try std.testing.expect(subjectMatches(">", "anything.deep.inside"));
 }

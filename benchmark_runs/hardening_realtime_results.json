@@ -1,0 +1,47 @@
+[
+  {
+    "scenario": "telemetry",
+    "messages": 1000,
+    "devices": 100,
+    "hz_per_device": 10,
+    "elapsed_s": 0.06573121499968693,
+    "messages_per_sec": 15213.472016374
+  },
+  {
+    "scenario": "command_control",
+    "devices": 100,
+    "commands": 100,
+    "elapsed_s": 0.0395928539801389,
+    "commands_per_sec": 2525.708302062876
+  },
+  {
+    "scenario": "alert_burst",
+    "events": 1000,
+    "elapsed_s": 0.05437919299583882,
+    "events_per_sec": 18389.386544896344
+  },
+  {
+    "scenario": "request_reply_timeout",
+    "completed_request_reply": true,
+    "missing_service_timeout_s": 0.25
+  },
+  {
+    "scenario": "retained_reconnect",
+    "topic": "state.device1",
+    "payload": "online",
+    "ttl_ms": 5000
+  },
+  {
+    "scenario": "consumer_group",
+    "members": 3,
+    "messages": 30,
+    "per_member": [
+      10,
+      10,
+      10
+    ],
+    "elapsed_s": 0.031971075979527086,
+    "messages_per_sec": 938.3481500344474
+  }
+]
+REALTIME_SCENARIOS_OK

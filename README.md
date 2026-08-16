@@ -18,7 +18,9 @@
 | Durable stream | Optional append-only local stream enabled with `--stream <path>` |
 | Delivery | In-memory at-most-once fan-out; stream replay is explicit and local |
 | Backpressure | 32 queued messages or 256 KiB per client, then slow clients are disconnected |
-| Authentication | Optional shared token using `--auth-token` |
+| Authentication | Optional shared token using `--auth-token`; constant-time comparison and bounded pre-auth commands |
+| Safety limits | 1,024 clients, 1,024 subscriptions per client, 8 pre-auth commands per connection |
+| Stream file security | Durable stream files are created and chmodded to owner-only `0600` permissions |
 | NATS mode | Small subset: `INFO`, `CONNECT`, `PUB`, `SUB`, `UNSUB`, `MSG`, `PING`, `PONG` |
 | CLI | Pure-Zig `server`, `pub`, `sub`, `ping`, `shell`, and `bench pub` commands |
 | Embedding | `libzigmq_core.so` exports subject helpers, hashing, and frame encoding for the Python ctypes bridge |
@@ -37,6 +39,7 @@ python3 scripts/edge_features_test.py --binary ./zig-out/bin/zigmq
 python3 scripts/stream_test.py --binary ./zig-out/bin/zigmq
 python3 scripts/cli_test.py --binary ./zig-out/bin/zigmq
 python3 scripts/python_ffi_test.py
+python3 scripts/security_hardening_test.py --binary ./zig-out/bin/zigmq
 ```
 
 The repository also runs the build, unit tests, and integration checks in GitHub Actions for pushes and pull requests targeting `main`.
@@ -155,6 +158,14 @@ For a small trusted edge deployment, enable a shared token:
 zig build run -- --auth-token edge-secret
 ```
 
+For deployments where the token should not appear in the process command line, store it in a protected file and use:
+
+```sh
+zig build run -- --auth-token-file ./data/zigmq.token
+```
+
+The file is trimmed for a final newline and loaded into memory only for the broker lifetime. Protect the file with owner-only permissions.
+
 Clients must authenticate before using broker commands:
 
 ```text
@@ -162,7 +173,13 @@ AUTH edge-secret
 +OK AUTH
 ```
 
-The token is intentionally simple and is not a replacement for TLS or a full identity system. Do not expose this mode directly to an untrusted network without placing it behind an encrypted transport or trusted network boundary.
+The token is intentionally simple and is not a replacement for TLS or a full identity system. The direct `--auth-token` form can be visible to local users through process inspection; prefer `--auth-token-file` for local deployments. Token comparison avoids an early-exit equality check, invalid NATS authorization closes the connection, and unauthenticated connections are bounded to eight commands. Do not expose this mode directly to an untrusted network without placing it behind an encrypted transport or trusted network boundary.
+
+## Security and operational guardrails
+
+The current edge-hardening branch adds explicit resource bounds: a maximum of 1,024 connected clients, 1,024 custom subscriptions per client, 1,024 NATS subscriptions per client, and eight commands before authentication. A client that exceeds its subscription or pre-auth budget receives an error or is closed; a client that exceeds its delivery queue is disconnected. These are protection limits, not capacity guarantees, and they can be changed as compile-time constants in `src/root.zig` after hardware testing.
+
+The optional stream file is opened with an exclusive advisory lock and owner-only `0600` permissions. This protects the stream from ordinary local users, but it does not encrypt the file. Use filesystem encryption or a protected service account when stream payloads are sensitive. TCP transport is still plaintext until a TLS layer is added.
 
 ## Graceful shutdown
 
@@ -190,7 +207,7 @@ The custom protocol remains the simplest option for retained messages, consumer 
 
 ## Limits and delivery model
 
-The broker limits control lines to 1 KiB, topics to 256 bytes, payloads to 64 KiB, and each client queue to 32 messages or 256 KiB. Publishers enqueue copies of messages instead of writing directly to subscriber sockets, so a slow client does not hold the broker routing lock. When a client exceeds its queue bound, zigmq disconnects it rather than growing memory without limit.
+The broker limits control lines to 1 KiB, topics to 256 bytes, payloads to 64 KiB, each client queue to 32 messages or 256 KiB, connected clients to 1,024, and subscriptions to 1,024 per client. Publishers enqueue copies of messages instead of writing directly to subscriber sockets, so a slow client does not hold the broker routing lock. When a client exceeds its queue bound, zigmq disconnects it rather than growing memory without limit.
 
 Live delivery is at-most-once and memory-only. The optional stream is an append-only local record of custom publishes and requests, and replay is an explicit operation. There is no replication, acknowledgment protocol, retry queue, or clustered failover. Restarting without `--stream` loses subscriptions, retained values, and queued messages; starting with `--stream` restores only stream sequence state and makes prior records replayable.
 
@@ -273,8 +290,10 @@ python3 scripts/benchmark_fanout.py --binary ./zig-out/bin/zigmq --subscribers 5
 | `scripts/realtime_scenarios.py` | Telemetry, control, burst, RPC, retained reconnect, and group simulations |
 | `scripts/benchmark.py` | Local throughput and client-capacity benchmark |
 | `scripts/benchmark_fanout.py` | Multi-subscriber routing benchmark |
+| `scripts/benchmark_modes.py` | Durable-stream versus memory-only publish benchmark |
 | `scripts/compare_nats.py` | Controlled NATS-compatible comparison harness |
 | `scripts/nats_index_test.py` | Exact-index, wildcard, unsubscribe, and disconnect regression test |
+| `scripts/security_hardening_test.py` | Authentication, connection, subscription, and stream-permission regression test |
 | `scripts/format_nats_matrix.py` | Reproducible formatter for raw comparison logs |
 | `comparison_results.md` | Captured ZigMQ versus NATS matrix and interpretation |
 | `optimization_results.md` | Before/after queue and NATS-index measurements |

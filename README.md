@@ -281,8 +281,23 @@ python3 scripts/benchmark_fanout.py --binary ./zig-out/bin/zigmq --subscribers 5
 | `benchmark_results.md` | Recorded sandbox baseline and interpretation |
 | `performance_results.md` | Main-versus-optimized throughput comparison |
 | `.github/workflows/ci.yml` | Zig 0.15.2 build and integration-test workflow |
+| `.github/workflows/release.yml` | Manual-only semantic-version release workflow |
 | `build.zig` | Zig build graph and test steps |
 | `build.zig.zon` | Package metadata with minimum Zig version pinned to 0.15.2 |
+
+## Manual releases
+
+Releases are intentionally **manual-only**. Merging a pull request or pushing to `main` runs CI but does not create a tag or GitHub release.
+
+To publish a release, open the repository’s **Actions** tab, select the **Release** workflow, choose **Run workflow**, and provide:
+
+| Input | Example | Meaning |
+| --- | --- | --- |
+| `version` | `v0.2.0` | New semantic-version release tag; it must not already exist |
+| `target` | `main` | Branch or commit to validate and release |
+| `prerelease` | `false` | Whether GitHub should mark the release as a prerelease |
+
+The workflow checks the version format, refuses an existing tag, runs `zig build test`, builds ReleaseFast, and then creates the GitHub release with generated notes. The workflow requires repository contents write permission, so only maintainers with appropriate Actions permissions can publish a release.
 
 ## License
 

@@ -108,6 +108,20 @@ The broker limits control lines to 1 KiB, topics to 256 bytes, payloads to 64 Ki
 
 Delivery is in-memory and at-most-once. There is no persistence, replay, acknowledgment, or retry queue. Restarting the process loses subscriptions and queued messages.
 
+## Measured baseline
+
+The repository includes `scripts/benchmark.py` for repeatable local measurements. On the development sandbox, with Zig 0.15.2, a Debug build, 12-byte payloads, and one subscriber, the broker measured approximately **17,500-18,500 publish acknowledgments per second** and **9,600-9,850 delivered fan-out messages per second**. A 100,000-message run completed successfully; that means 100,000 messages is a reasonable test volume, not that the broker supports 100,000 messages per second.
+
+The one-thread-per-client design held **1,000 idle TCP clients** on the test host, with sequential connection establishment around 98 clients per second. This is not a target for 100,000 concurrent clients. For a small edge device, start with a design budget of roughly 1,000-5,000 messages per second and tens to hundreds of active clients until the actual hardware, payload size, subscriber count, socket limits, and network are benchmarked. The bounded queues protect memory by disconnecting slow consumers rather than allowing unbounded growth.
+
+Run the local benchmark with:
+
+```sh
+python3 scripts/benchmark.py --binary ./zig-out/bin/zigmq --messages 10000 --clients 100
+```
+
+These figures are host-specific measurements, not performance guarantees. Larger payloads, multiple subscribers, authentication, TLS, storage, and constrained CPUs will reduce throughput.
+
 ## Project structure
 
 | Path | Purpose |
@@ -115,6 +129,8 @@ Delivery is in-memory and at-most-once. There is no persistence, replay, acknowl
 | `src/root.zig` | Subject validation, wildcard matching, command parsing, and parser tests |
 | `src/main.zig` | TCP listener, client queues, routing, authentication, shutdown, and NATS subset |
 | `scripts/e2e_test.py` | Automated custom, authentication, wildcard, NATS, and shutdown tests |
+| `scripts/benchmark.py` | Local throughput and client-capacity benchmark |
+| `benchmark_results.md` | Recorded sandbox baseline and interpretation |
 | `.github/workflows/ci.yml` | Zig 0.15.2 build and integration-test workflow |
 | `build.zig` | Zig build graph and test steps |
 | `build.zig.zon` | Package metadata with minimum Zig version pinned to 0.15.2 |

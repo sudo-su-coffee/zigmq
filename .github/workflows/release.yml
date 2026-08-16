@@ -61,7 +61,7 @@ jobs:
           zig build test
           zig build -Doptimize=ReleaseFast
           expected_version="${RELEASE_VERSION#v}"
-          actual_version="$(./zig-out/bin/zigmq --version | awk '{print $2}')"
+          actual_version="$(./zig-out/bin/zigmq --version 2>&1 | awk '{print $2}')"
           if [[ "$actual_version" != "$expected_version" ]]; then
             echo "Binary version $actual_version does not match release $expected_version"
             exit 1

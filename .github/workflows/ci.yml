@@ -47,5 +47,5 @@ jobs:
       - name: NATS index regression
         run: python3 scripts/nats_index_test.py --binary ./zig-out/bin/zigmq
 
-      - name: MQTT compatibility regression
-        run: python3 scripts/mqtt_compat_test.py --binary ./zig-out/bin/zigmq
+      - name: Security hardening regression
+        run: python3 scripts/security_hardening_test.py --binary ./zig-out/bin/zigmq

@@ -1,0 +1,5 @@
+messages=1000
+payload_bytes=128
+without_stream_publish_ack_msg_per_sec=36618.7
+with_stream_publish_ack_msg_per_sec=6294.2
+stream_relative_rate_percent=17.2

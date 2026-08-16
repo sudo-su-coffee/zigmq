@@ -1,0 +1,3 @@
+publish_ack_msg_per_sec=23563.4
+fanout_msg_per_sec=13482.2
+client_connects_per_sec=98.1

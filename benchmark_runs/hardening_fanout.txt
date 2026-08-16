@@ -1,0 +1,4 @@
+subscribers=50
+messages=1000
+broker_messages_per_sec=1781.3
+deliveries_per_sec=89066.7

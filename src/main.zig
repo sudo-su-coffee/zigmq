@@ -1364,6 +1364,10 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--version")) {
+        std.debug.print("zigmq {s}\n", .{zigmq.version});
+        return;
+    }
     if (args.len >= 2 and !std.mem.startsWith(u8, args[1], "--") and !std.mem.eql(u8, args[1], "server")) {
         return cli.run(allocator, args);
     }
@@ -1406,8 +1410,11 @@ pub fn main() !void {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingStreamPath;
             stream_path = args[index];
+        } else if (std.mem.eql(u8, args[index], "--version")) {
+            std.debug.print("zigmq {s}\n", .{zigmq.version});
+            return;
         } else if (std.mem.eql(u8, args[index], "--help")) {
-            std.debug.print("Usage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats|mqtt|zmp] [--auth-token token|--auth-token-file path] [--stream path]\n", .{});
+            std.debug.print("zigmq {s}\nUsage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats|mqtt|zmp] [--auth-token token|--auth-token-file path] [--stream path]\n", .{zigmq.version});
             return;
         } else {
             std.debug.print("Unknown argument: {s}\n", .{args[index]});

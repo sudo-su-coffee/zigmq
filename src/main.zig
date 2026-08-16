@@ -56,7 +56,6 @@ var stop_requested = std.atomic.Value(bool).init(false);
 const Client = struct {
     stream: net.Stream,
     allocator: Allocator,
-    authenticated: bool,
     queue_mutex: std.Thread.Mutex = .{},
     queue_condition: std.Thread.Condition = .{},
     queue: std.ArrayList([]u8) = .empty,

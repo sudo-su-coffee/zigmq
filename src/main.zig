@@ -10,7 +10,11 @@ const NatsSubscription = struct { subject: []u8, sid: []u8 };
 const NatsSubscriptionRef = struct { subject: []const u8, sid: []const u8, client: *Client };
 const RetainedMessage = struct { payload: []u8, expires_at_ns: i128 };
 const WildcardSubscription = struct { pattern: []const u8, client: *Client };
-const GroupSubscription = struct { pattern: []const u8, group: []const u8, client: *Client };
+const GroupBucket = struct {
+    pattern: []u8,
+    clients: std.ArrayList(*Client) = .empty,
+    next: usize = 0,
+};
 
 var stop_requested = std.atomic.Value(bool).init(false);
 
@@ -26,6 +30,7 @@ const Client = struct {
     closed: bool = false,
     last_delivery_generation: usize = 0,
     authenticated: bool = true,
+    preauth_commands: usize = 0,
     verbose: bool = true,
     subscriptions: std.StringHashMap(?[]u8),
     nats_subscriptions: std.ArrayList(NatsSubscription) = .empty,
@@ -176,7 +181,7 @@ const Broker = struct {
     clients: std.ArrayList(*Client) = .empty,
     exact_subscribers: std.StringHashMap(std.ArrayList(*Client)),
     wildcard_subscriptions: std.ArrayList(WildcardSubscription) = .empty,
-    group_subscriptions: std.ArrayList(GroupSubscription) = .empty,
+    group_subscribers: std.StringHashMap(GroupBucket),
     nats_subscribers: std.StringHashMap(std.ArrayList(NatsSubscriptionRef)),
     nats_wildcard_subscriptions: std.ArrayList(NatsSubscriptionRef) = .empty,
     retained: std.StringHashMap(RetainedMessage),
@@ -192,6 +197,7 @@ const Broker = struct {
             .port = port,
             .auth_token = auth_token,
             .exact_subscribers = std.StringHashMap(std.ArrayList(*Client)).init(allocator),
+            .group_subscribers = std.StringHashMap(GroupBucket).init(allocator),
             .nats_subscribers = std.StringHashMap(std.ArrayList(NatsSubscriptionRef)).init(allocator),
             .retained = std.StringHashMap(RetainedMessage).init(allocator),
             .stream_file = stream_file,
@@ -201,6 +207,7 @@ const Broker = struct {
     fn addClient(self: *Broker, client: *Client) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
+        if (self.clients.items.len >= zigmq.max_clients) return error.TooManyClients;
         try self.clients.append(self.allocator, client);
     }
 
@@ -243,8 +250,10 @@ const Broker = struct {
         var iterator = client.subscriptions.iterator();
         while (iterator.next()) |entry| {
             self.removeIndexLocked(client, entry.key_ptr.*);
-            self.removeGroupIndexLocked(client, entry.key_ptr.*);
-            if (entry.value_ptr.*) |group| self.allocator.free(group);
+            if (entry.value_ptr.*) |group| {
+                self.removeGroupIndexLocked(client, entry.key_ptr.*, group);
+                self.allocator.free(group);
+            }
             self.allocator.free(entry.key_ptr.*);
         }
         client.subscriptions.clearRetainingCapacity();
@@ -270,7 +279,13 @@ const Broker = struct {
         }
         self.exact_subscribers.deinit();
         self.wildcard_subscriptions.deinit(self.allocator);
-        self.group_subscriptions.deinit(self.allocator);
+        var group_iterator = self.group_subscribers.iterator();
+        while (group_iterator.next()) |entry| {
+            entry.value_ptr.clients.deinit(self.allocator);
+            self.allocator.free(entry.value_ptr.pattern);
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.group_subscribers.deinit();
         var nats_iterator = self.nats_subscribers.iterator();
         while (nats_iterator.next()) |entry| {
             entry.value_ptr.deinit(self.allocator);
@@ -335,20 +350,46 @@ const Broker = struct {
         }
     }
 
-    fn addGroupIndexLocked(self: *Broker, client: *Client, pattern: []const u8, group: []const u8) !void {
-        try self.group_subscriptions.append(self.allocator, .{
-            .pattern = client.subscriptions.getKey(pattern).?,
-            .group = client.subscriptions.get(pattern).?.?,
-            .client = client,
-        });
-        _ = group;
+    fn groupKey(self: *Broker, pattern: []const u8, group: []const u8) ![]u8 {
+        const key = try self.allocator.alloc(u8, pattern.len + 1 + group.len);
+        @memcpy(key[0..pattern.len], pattern);
+        key[pattern.len] = 0;
+        @memcpy(key[pattern.len + 1 ..], group);
+        return key;
     }
 
-    fn removeGroupIndexLocked(self: *Broker, client: *Client, pattern: []const u8) void {
-        for (self.group_subscriptions.items, 0..) |subscription, index| {
-            if (subscription.client == client and std.mem.eql(u8, subscription.pattern, pattern)) {
-                _ = self.group_subscriptions.swapRemove(index);
-                return;
+    fn addGroupIndexLocked(self: *Broker, client: *Client, pattern: []const u8, group: []const u8) !void {
+        const key_view = try self.groupKey(pattern, group);
+        errdefer self.allocator.free(key_view);
+        if (self.group_subscribers.getPtr(key_view)) |bucket| {
+            defer self.allocator.free(key_view);
+            try bucket.clients.append(self.allocator, client);
+            return;
+        }
+        var bucket = GroupBucket{ .pattern = try self.allocator.dupe(u8, pattern) };
+        errdefer self.allocator.free(bucket.pattern);
+        errdefer bucket.clients.deinit(self.allocator);
+        try bucket.clients.append(self.allocator, client);
+        try self.group_subscribers.put(key_view, bucket);
+    }
+
+    fn removeGroupIndexLocked(self: *Broker, client: *Client, pattern: []const u8, group: []const u8) void {
+        const key = self.groupKey(pattern, group) catch return;
+        defer self.allocator.free(key);
+        if (self.group_subscribers.getPtr(key)) |bucket| {
+            for (bucket.clients.items, 0..) |candidate, index| {
+                if (candidate == client) {
+                    _ = bucket.clients.swapRemove(index);
+                    if (bucket.next >= bucket.clients.items.len) bucket.next = 0;
+                    break;
+                }
+            }
+            if (bucket.clients.items.len == 0) {
+                const removed = self.group_subscribers.fetchRemove(key).?;
+                var removed_bucket = removed.value;
+                removed_bucket.clients.deinit(self.allocator);
+                self.allocator.free(removed_bucket.pattern);
+                self.allocator.free(removed.key);
             }
         }
     }
@@ -360,32 +401,14 @@ const Broker = struct {
     }
 
     fn deliverOneGroup(self: *Broker, topic: []const u8, reply: ?[]const u8, payload: []const u8) void {
-        for (self.group_subscriptions.items, 0..) |subscription, first_index| {
-            if (!zigmq.subjectMatches(subscription.pattern, topic)) continue;
-            var duplicate = false;
-            for (self.group_subscriptions.items[0..first_index]) |previous| {
-                if (std.mem.eql(u8, previous.pattern, subscription.pattern) and std.mem.eql(u8, previous.group, subscription.group)) {
-                    duplicate = true;
-                    break;
-                }
-            }
-            if (duplicate) continue;
-            var count: usize = 0;
-            for (self.group_subscriptions.items) |candidate| {
-                if (std.mem.eql(u8, candidate.pattern, subscription.pattern) and std.mem.eql(u8, candidate.group, subscription.group) and zigmq.subjectMatches(candidate.pattern, topic)) count += 1;
-            }
-            if (count == 0) continue;
-            const chosen = self.delivery_generation % count;
-            var current: usize = 0;
-            for (self.group_subscriptions.items) |candidate| {
-                if (std.mem.eql(u8, candidate.pattern, subscription.pattern) and std.mem.eql(u8, candidate.group, subscription.group) and zigmq.subjectMatches(candidate.pattern, topic)) {
-                    if (current == chosen) {
-                        self.deliverCustom(candidate.client, topic, reply, payload);
-                        break;
-                    }
-                    current += 1;
-                }
-            }
+        var iterator = self.group_subscribers.iterator();
+        while (iterator.next()) |entry| {
+            const bucket = entry.value_ptr;
+            if (bucket.clients.items.len == 0 or !zigmq.subjectMatches(bucket.pattern, topic)) continue;
+            if (bucket.next >= bucket.clients.items.len) bucket.next = 0;
+            const client = bucket.clients.items[bucket.next];
+            bucket.next = (bucket.next + 1) % bucket.clients.items.len;
+            self.deliverCustom(client, topic, reply, payload);
         }
     }
 
@@ -514,6 +537,7 @@ const Broker = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         if (client.subscriptions.contains(subject)) return false;
+        if (client.subscriptions.count() >= zigmq.max_subscriptions_per_client) return error.TooManySubscriptions;
         const copy = try self.allocator.dupe(u8, subject);
         errdefer self.allocator.free(copy);
         const group_copy = if (group) |value| try self.allocator.dupe(u8, value) else null;
@@ -543,8 +567,10 @@ const Broker = struct {
         defer self.mutex.unlock();
         const removed = client.subscriptions.fetchRemove(subject) orelse return false;
         self.removeIndexLocked(client, removed.key);
-        self.removeGroupIndexLocked(client, removed.key);
-        if (removed.value) |group| self.allocator.free(group);
+        if (removed.value) |group| {
+            self.removeGroupIndexLocked(client, removed.key, group);
+            self.allocator.free(group);
+        }
         self.allocator.free(removed.key);
         return true;
     }
@@ -552,6 +578,7 @@ const Broker = struct {
     fn natsSubscribe(self: *Broker, client: *Client, subject: []const u8, sid: []const u8) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
+        if (client.nats_subscriptions.items.len >= zigmq.max_nats_subscriptions_per_client) return error.TooManySubscriptions;
         for (client.nats_subscriptions.items) |subscription| {
             if (std.mem.eql(u8, subscription.sid, sid)) return error.DuplicateSubscription;
         }
@@ -624,13 +651,20 @@ fn parseProtocol(text: []const u8) !Protocol {
     return error.InvalidProtocol;
 }
 
+fn secureEqual(left: []const u8, right: []const u8) bool {
+    if (left.len != right.len) return false;
+    var difference: u8 = 0;
+    for (left, 0..) |byte, index| difference |= byte ^ right[index];
+    return difference == 0;
+}
+
 fn authMatches(line: []const u8, expected: []const u8) bool {
     const marker = "\"auth_token\"";
     const marker_start = std.mem.indexOf(u8, line, marker) orelse return false;
     const colon = std.mem.indexOfScalarPos(u8, line, marker_start + marker.len, ':') orelse return false;
     const value_start = std.mem.indexOfScalarPos(u8, line, colon + 1, '"') orelse return false;
     const value_end = std.mem.indexOfScalarPos(u8, line, value_start + 1, '"') orelse return false;
-    return std.mem.eql(u8, line[value_start + 1 .. value_end], expected);
+    return secureEqual(line[value_start + 1 .. value_end], expected);
 }
 
 fn readLine(reader: *net.Stream.Reader) !?[]const u8 {
@@ -660,8 +694,9 @@ fn handleCustomCommand(broker: *Broker, client: *Client, line: []const u8) bool 
     switch (command) {
         .auth => |token| {
             if (broker.auth_token) |expected| {
-                if (std.mem.eql(u8, token, expected)) {
+                if (secureEqual(token, expected)) {
                     client.authenticated = true;
+                    client.preauth_commands = 0;
                     client.send("+OK AUTH\r\n") catch return false;
                 } else {
                     client.send("-ERR authentication failed\r\n") catch return false;
@@ -675,13 +710,19 @@ fn handleCustomCommand(broker: *Broker, client: *Client, line: []const u8) bool 
         else => {},
     }
     if (!client.authenticated) {
+        client.preauth_commands += 1;
+        if (client.preauth_commands > zigmq.max_preauth_commands) {
+            client.send("-ERR authentication command limit reached\r\n") catch {};
+            return false;
+        }
         client.send("-ERR authentication required\r\n") catch return false;
         return true;
     }
     switch (command) {
         .subscribe => |subscription| {
-            const added = broker.subscribe(client, subscription.subject, subscription.group) catch {
-                client.send("-ERR out of memory\r\n") catch return false;
+            const added = broker.subscribe(client, subscription.subject, subscription.group) catch |err| {
+                const response = if (err == error.TooManySubscriptions) "-ERR subscription limit reached\r\n" else "-ERR out of memory\r\n";
+                client.send(response) catch return false;
                 return true;
             };
             client.send(if (added) "+OK SUB\r\n" else "+OK already subscribed\r\n") catch return false;
@@ -752,9 +793,19 @@ fn natsError(client: *Client, message: []const u8) bool {
 fn handleNatsCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader, line: []const u8) bool {
     var tokens = std.mem.tokenizeAny(u8, std.mem.trim(u8, line, " \t\r\n"), " \t");
     const operation = tokens.next() orelse return natsError(client, "Empty Command");
+    if (!client.authenticated and !std.ascii.eqlIgnoreCase(operation, "CONNECT")) {
+        client.preauth_commands += 1;
+        if (client.preauth_commands > zigmq.max_preauth_commands) {
+            _ = natsError(client, "Authentication Command Limit");
+            return false;
+        }
+    }
     if (std.ascii.eqlIgnoreCase(operation, "CONNECT")) {
         if (broker.auth_token) |expected| {
-            if (!authMatches(line, expected)) return natsError(client, "Authorization Violation");
+            if (!authMatches(line, expected)) {
+                _ = natsError(client, "Authorization Violation");
+                return false;
+            }
         }
         client.verbose = natsVerbose(line);
         client.authenticated = true;
@@ -774,7 +825,10 @@ fn handleNatsCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reade
         const sid = tokens.next() orelse second;
         if (tokens.next() != null) return natsError(client, "Bad Subscription");
         zigmq.validateSubject(subject, true) catch return natsError(client, "Invalid Subject");
-        broker.natsSubscribe(client, subject, sid) catch return natsError(client, "Bad Subscription");
+        broker.natsSubscribe(client, subject, sid) catch |err| {
+            if (err == error.TooManySubscriptions) return natsError(client, "Subscription Limit");
+            return natsError(client, "Bad Subscription");
+        };
         if (client.verbose) client.send("+OK\r\n") catch return false;
         return true;
     }
@@ -813,7 +867,10 @@ fn handleClient(broker: *Broker, stream: net.Stream) void {
     var client = Client.init(stream, broker.allocator, initially_authenticated);
     defer client.deinit();
     defer stream.close();
-    if (broker.addClient(&client)) |_| {} else |_| return;
+    if (broker.addClient(&client)) |_| {} else |_| {
+        stream.writeAll("-ERR server overloaded\r\n") catch {};
+        return;
+    }
     defer broker.disconnect(&client);
 
     const writer = std.Thread.spawn(.{}, Client.writerLoop, .{&client}) catch return;
@@ -869,6 +926,12 @@ pub fn main() !void {
     var port: u16 = 4222;
     var protocol: Protocol = .custom;
     var auth_token: ?[]const u8 = null;
+    var auth_token_file: ?[]const u8 = null;
+    var auth_token_owned: ?[]u8 = null;
+    defer if (auth_token_owned) |token| {
+        std.crypto.secureZero(u8, token);
+        allocator.free(token);
+    };
     var stream_path: ?[]const u8 = null;
     var index: usize = if (args.len >= 2 and std.mem.eql(u8, args[1], "server")) 2 else 1;
     while (index < args.len) : (index += 1) {
@@ -888,12 +951,16 @@ pub fn main() !void {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingAuthToken;
             auth_token = args[index];
+        } else if (std.mem.eql(u8, args[index], "--auth-token-file")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingAuthTokenFile;
+            auth_token_file = args[index];
         } else if (std.mem.eql(u8, args[index], "--stream")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingStreamPath;
             stream_path = args[index];
         } else if (std.mem.eql(u8, args[index], "--help")) {
-            std.debug.print("Usage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats] [--auth-token token] [--stream path]\n", .{});
+            std.debug.print("Usage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats] [--auth-token token|--auth-token-file path] [--stream path]\n", .{});
             return;
         } else {
             std.debug.print("Unknown argument: {s}\n", .{args[index]});
@@ -901,6 +968,18 @@ pub fn main() !void {
         }
     }
 
+    if (auth_token != null and auth_token_file != null) return error.DuplicateAuthConfiguration;
+    if (auth_token_file) |path| {
+        const token_data = try std.fs.cwd().readFileAlloc(allocator, path, zigmq.max_topic_length + 1);
+        const token = std.mem.trim(u8, token_data, " \t\r\n");
+        if (token.len == 0 or token.len > zigmq.max_topic_length) {
+            std.crypto.secureZero(u8, token_data);
+            allocator.free(token_data);
+            return error.InvalidAuthTokenFile;
+        }
+        auth_token_owned = token_data;
+        auth_token = token;
+    }
     stop_requested.store(false, .seq_cst);
     installSignalHandlers();
     const address = try net.Address.parseIp4(host, port);
@@ -908,7 +987,10 @@ pub fn main() !void {
     defer server.deinit();
     var stream_file: ?std.fs.File = null;
     if (stream_path) |path| {
-        stream_file = try std.fs.cwd().createFile(path, .{ .read = true, .truncate = false, .lock = .exclusive });
+        var file = try std.fs.cwd().createFile(path, .{ .read = true, .truncate = false, .lock = .exclusive, .mode = 0o600 });
+        errdefer file.close();
+        try file.chmod(0o600);
+        stream_file = file;
     }
     var broker = Broker.init(allocator, protocol, host, port, auth_token, stream_file);
     defer broker.deinit();

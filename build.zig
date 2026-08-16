@@ -57,6 +57,20 @@ pub fn build(b: *std.Build) void {
     //
     // If neither case applies to you, feel free to delete the declaration you
     // don't need and to put everything under a single module.
+    const shared_lib = b.addLibrary(.{
+        .name = "zigmq_core",
+        .linkage = .dynamic,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/lib.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigmq", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(shared_lib);
+
     const exe = b.addExecutable(.{
         .name = "zigmq",
         .root_module = b.createModule(.{
@@ -128,6 +142,11 @@ pub fn build(b: *std.Build) void {
     // Creates an executable that will run `test` blocks from the executable's
     // root module. Note that test executables only test one module at a time,
     // hence why we have to create two separate ones.
+    const lib_tests = b.addTest(.{
+        .root_module = shared_lib.root_module,
+    });
+    const run_lib_tests = b.addRunArtifact(lib_tests);
+
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
     });
@@ -140,6 +159,7 @@ pub fn build(b: *std.Build) void {
     // make the two of them run in parallel.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
+    test_step.dependOn(&run_lib_tests.step);
     test_step.dependOn(&run_exe_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.

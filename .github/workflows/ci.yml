@@ -28,3 +28,18 @@ jobs:
 
       - name: End-to-end tests
         run: python3 scripts/e2e_test.py --binary ./zig-out/bin/zigmq
+
+      - name: Edge feature tests
+        run: python3 scripts/edge_features_test.py --binary ./zig-out/bin/zigmq
+
+      - name: Durable stream tests
+        run: python3 scripts/stream_test.py --binary ./zig-out/bin/zigmq
+
+      - name: CLI tests
+        run: python3 scripts/cli_test.py --binary ./zig-out/bin/zigmq
+
+      - name: Python FFI test
+        run: python3 scripts/python_ffi_test.py
+
+      - name: Real-time workload scenarios
+        run: python3 scripts/realtime_scenarios.py --binary ./zig-out/bin/zigmq

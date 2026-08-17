@@ -227,7 +227,7 @@ test "journal recovers unacknowledged delivery and removes acknowledged delivery
 test "journal compacts away acknowledged records" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var file = try tmp.dir.createFile("sessions.zms", .{ .read = true, .truncate = true });
+    const file = try tmp.dir.createFile("sessions.zms", .{ .read = true, .truncate = true });
     var journal = try Journal.open(std.testing.allocator, file);
     try journal.appendPublish("device-7", 1, "device.command", "OPEN", 5000);
     try journal.appendPublish("device-7", 2, "device.command", "CLOSE", 5000);
@@ -236,7 +236,7 @@ test "journal compacts away acknowledged records" {
     defer compacted.close();
     try journal.compactInto(compacted);
     journal.deinit();
-    var recovered_file = try tmp.dir.openFile("sessions.compact.zms", .{ .mode = .read_write });
+    const recovered_file = try tmp.dir.openFile("sessions.compact.zms", .{ .mode = .read_write });
     var recovered = try Journal.open(std.testing.allocator, recovered_file);
     defer recovered.deinit();
     try std.testing.expectEqual(@as(usize, 1), recovered.deliveries.count());

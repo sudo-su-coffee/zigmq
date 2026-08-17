@@ -52,3 +52,24 @@ The 0.6.0 broker can continue local traffic within its configured resource limit
 | Commands | Use `durable`, consumer ACKs, expiry, and idempotent command handlers. |
 | Migration | Translate MQTT and NATS at the boundary into the canonical ZigMV envelope. |
 | Failure | Test upstream outage, local restart, slow consumer, disk pressure, and reconnect before production. |
+
+## Secure remote binding
+
+ZigMV keeps the simplest local deployment path lightweight: the default `127.0.0.1` bind can be used on a Raspberry Pi or local edge host with the native protocol. When the broker binds beyond loopback, it requires an authentication token unless the operator explicitly supplies `--allow-insecure-remote` for a controlled lab network. Production remote deployments should use an authentication token, subject ACLs, a protected metrics bind, and TLS or an authenticated transport boundary before exposure to an untrusted network.
+
+Example local edge launch:
+
+```sh
+./zigmq --protocol zigmv --host 127.0.0.1 --port 4222 \
+  --session-store /var/lib/zigmv/session.journal --metrics-port 9090
+```
+
+Example remotely reachable launch with a token file:
+
+```sh
+./zigmq --protocol zigmv --host 0.0.0.0 --port 4222 \
+  --auth-token-file /etc/zigmv/token \
+  --publish-allow 'telemetry.>' --subscribe-allow 'telemetry.>'
+```
+
+The broker remains a transport and delivery process rather than a database or inference runtime. AI applications should publish opaque telemetry, command, inference-request, and inference-result payloads through ZigMV; the consumer or worker decodes them and writes durable business data to its chosen database.

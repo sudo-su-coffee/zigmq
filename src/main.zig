@@ -25,6 +25,8 @@ const BrokerStats = struct {
     redelivered: u64 = 0,
     acknowledged: u64 = 0,
     expired: u64 = 0,
+    rejected_clients: u64 = 0,
+    payload_bytes: u64 = 0,
 };
 const DurableDelivery = struct {
     client: ?*Client,
@@ -417,6 +419,8 @@ const Broker = struct {
             .redelivered_total = self.stats.redelivered,
             .acknowledged_total = self.stats.acknowledged,
             .expired_total = self.stats.expired,
+            .rejected_clients_total = self.stats.rejected_clients,
+            .payload_bytes_total = self.stats.payload_bytes,
         };
     }
 
@@ -431,7 +435,10 @@ const Broker = struct {
     fn addClient(self: *Broker, client: *Client) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        if (self.clients.items.len >= zigmq.max_clients) return error.TooManyClients;
+        if (self.clients.items.len >= zigmq.max_clients) {
+            self.stats.rejected_clients += 1;
+            return error.TooManyClients;
+        }
         try self.clients.append(self.allocator, client);
     }
 
@@ -773,6 +780,7 @@ const Broker = struct {
     fn publishZigmv(self: *Broker, profile: []const u8, topic: []const u8, payload: []const u8, ttl_ms: u64) !void {
         self.mutex.lock();
         self.stats.published += 1;
+        self.stats.payload_bytes += payload.len;
         defer self.mutex.unlock();
         self.delivery_generation +%= 1;
         if (self.delivery_generation == 0) self.delivery_generation = 1;
@@ -1841,6 +1849,7 @@ pub fn main() !void {
     var protocol: Protocol = .custom;
     var auth_token: ?[]const u8 = null;
     var auth_token_file: ?[]const u8 = null;
+    var allow_insecure_remote = false;
     var publish_allow: ?[]const u8 = null;
     var subscribe_allow: ?[]const u8 = null;
     var publish_rate_limit: u32 = 0;
@@ -1875,6 +1884,8 @@ pub fn main() !void {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingAuthTokenFile;
             auth_token_file = args[index];
+        } else if (std.mem.eql(u8, args[index], "--allow-insecure-remote")) {
+            allow_insecure_remote = true;
         } else if (std.mem.eql(u8, args[index], "--publish-allow")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingPublishAllow;
@@ -1903,7 +1914,7 @@ pub fn main() !void {
             std.debug.print("zigmq {s}\n", .{zigmq.version});
             return;
         } else if (std.mem.eql(u8, args[index], "--help")) {
-            std.debug.print("zigmq {s}\nUsage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats|mqtt|zmp|zigmv] [--auth-token token|--auth-token-file path] [--publish-allow subject[,subject...]] [--subscribe-allow subject[,subject...]] [--publish-rate-limit messages_per_second] [--metrics-port port] [--stream path] [--session-store path]\n", .{zigmq.version});
+            std.debug.print("zigmq {s}\nUsage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats|mqtt|zmp|zigmv] [--auth-token token|--auth-token-file path] [--allow-insecure-remote] [--publish-allow subject[,subject...]] [--subscribe-allow subject[,subject...]] [--publish-rate-limit messages_per_second] [--metrics-port port] [--stream path] [--session-store path]\n", .{zigmq.version});
             return;
         } else {
             std.debug.print("Unknown argument: {s}\n", .{args[index]});
@@ -1912,6 +1923,8 @@ pub fn main() !void {
     }
 
     if (auth_token != null and auth_token_file != null) return error.DuplicateAuthConfiguration;
+    const loopback_host = std.mem.eql(u8, host, "127.0.0.1") or std.mem.eql(u8, host, "localhost") or std.mem.eql(u8, host, "::1");
+    if (!loopback_host and auth_token == null and !allow_insecure_remote) return error.RemoteBindRequiresAuth;
     if (auth_token_file) |path| {
         const token_data = try std.fs.cwd().readFileAlloc(allocator, path, zigmq.max_topic_length + 1);
         const token = std.mem.trim(u8, token_data, " \t\r\n");

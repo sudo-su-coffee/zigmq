@@ -74,12 +74,25 @@ def stop(process: subprocess.Popen[str]) -> None:
     process.wait(timeout=5)
 
 
+def assert_remote_bind_requires_auth(binary: str, port: int) -> None:
+    process = subprocess.run(
+        [binary, "--host", "0.0.0.0", "--port", str(port)],
+        capture_output=True,
+        text=True,
+        timeout=3,
+    )
+    combined = process.stdout + process.stderr
+    assert process.returncode != 0
+    assert "RemoteBindRequiresAuth" in combined, combined
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", default="zig-out/bin/zigmq")
     parser.add_argument("--port", type=int, default=4540)
     args = parser.parse_args()
 
+    assert_remote_bind_requires_auth(args.binary, args.port + 20)
     process = start(args.binary, args.port, "--auth-token", "secret")
     clients: list[LineSocket] = []
     try:

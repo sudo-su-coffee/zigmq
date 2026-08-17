@@ -83,6 +83,19 @@ The latest repeated local ReleaseFast run used localhost TCP and a 128-byte payl
 
 Historical local artifacts also record 23,563.4 publish-ACK messages/sec, 36,618.7 volatile stream-free publish-ACK messages/sec, 6,294.2 local-stream publish-ACK messages/sec, and 89,066.7 fan-out deliveries/sec with 50 subscribers. These values are regression evidence, not universal capacity guarantees.
 
+## Bounded soak evidence
+
+For a sustained release-evidence run, use the bounded soak harness:
+
+```sh
+python3 scripts/soak_test.py \
+  --binary ./zig-out/bin/zigmq \
+  --duration 60 \
+  --output benchmark_runs/zigmv_soak.txt
+```
+
+The pull-request workflow keeps long soak runs out of the default path; beta validation should run them in a controlled environment and record CPU, RSS, file descriptors, p50/p95/p99 latency, backpressure, and broker logs together with the output file.
+
 ## Benchmark matrix
 
 Before comparing releases, run payload sizes of 16, 128, 1,024, and 65,536 bytes; one, ten, fifty, and one hundred subscribers; one, four, sixteen, and sixty-four publishers; live, ACK, work, durable, and state profiles; and cold, warm, reconnect, and sustained-soak conditions.

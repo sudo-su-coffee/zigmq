@@ -41,7 +41,7 @@ ZMV/1 foundation
     -> 1.0.0-beta
 ```
 
-The current `main` branch already contains the ZMV/1 foundation, `live`, and the first `work` path. The next public target is therefore **`0.4.0`**, which combines the remaining foundation train: durable append, consumer cursors, ACK, retry, replay, retained state, expiry, and persistent sessions.
+The current release baseline is **`0.4.0`**, containing the ZMV/1 foundation, `live`, `work`, durable append, delivery IDs, ACK handling, retained state, and expiry behavior. The active public target is **`0.5.0`**, which is being implemented as one security and edge-transfer train rather than a sequence of small tags.
 
 ## Public PR policy
 
@@ -63,5 +63,7 @@ A beta release is not created just because the code compiles. The `1.0.0-beta.1`
 | ZMV/1 foundation | Merged and CI-tested |
 | `live` profile | Merged and CI-tested |
 | `work` profile | Merged and CI-tested |
-| Durable/state/exact broker profiles | Next implementation work in the `0.4.0` train |
+| Durable/state broker profiles | Implemented foundation in `0.4.0`; retry/recovery guarantees remain bounded |
+| `0.5.0` authentication and resource security | Partially implemented: native ZigMV AUTH, subject ACLs, subscription limits, and per-client publish rate limits |
+| `0.5.0` edge transfer and compatibility | Pending: TLS/mTLS, authenticated edge links, reconnect/offline transfer, and NATS/MQTT adapters |
 | 1.0.0-beta | Blocked until all grouped release gates pass |

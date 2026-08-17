@@ -4,7 +4,7 @@ Thank you for helping improve zigmq. The project is written in Zig and aims to s
 
 ## Before changing code
 
-Read the [README](README.md), the [ZMP protocol specification](docs/ZMP_PROTOCOL.md), and the [0.2.0 roadmap](docs/ZMP_V0.2.0_PLAN.md). Keep `zigkv` separate: zigmq is a message broker, not a Redis-compatible data store.
+Read the [README](README.md), the [ZigMV protocol specification](docs/ZIGMV_PROTOCOL.md), the [ZigMV roadmap](docs/ZIGMV_ROADMAP.md), and the [benchmark evidence](docs/ZIGMV_BENCHMARK_0.5.0.md). Keep `zigkv` separate: zigmq is a message broker, not a Redis-compatible data store.
 
 ## Development workflow
 
@@ -28,7 +28,7 @@ Performance changes must include a reproducible benchmark command and environmen
 
 ## Protocol changes
 
-ZMP changes must update the wire specification, parser tests, error behavior, and README usage examples. A new delivery guarantee must not be advertised until it has tests for backpressure, disconnects, restart recovery, duplicates, expiry, and acknowledgement behavior.
+ZigMV changes must update the wire specification, parser tests, error behavior, and README usage examples. A new delivery guarantee must not be advertised until it has tests for backpressure, disconnects, restart recovery, duplicates, expiry, and acknowledgement behavior.
 
 Compatibility changes must preserve the existing custom, NATS-compatible, and MQTT-compatible surfaces unless the pull request explicitly documents a breaking change.
 

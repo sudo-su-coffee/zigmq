@@ -12,11 +12,21 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/sudo-su-coffee/zigmq" alt="License"></a>
 </p>
 
-**zigmq** is a small TCP message broker written in Zig. The `0.2.0-beta.1` release introduces **ZMP (Zig Message Protocol)**, a new unified protocol inspired by the useful parts of NATS and MQTT 5.0.
+<p>
+  <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Go.svg?variant=secondary&size=sm&logo=go&logoColor=00ADD8&mode=dark" /><img alt="Go" src="https://shieldcn.dev/badge/Go.svg?variant=secondary&size=sm&logo=go&logoColor=00ADD8&mode=light" /></picture>
+  <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Firecracker.svg?variant=secondary&size=sm&logo=amazonaws&logoColor=FF9900&mode=dark" /><img alt="Firecracker" src="https://shieldcn.dev/badge/Firecracker.svg?variant=secondary&size=sm&logo=amazonaws&logoColor=FF9900&mode=light" /></picture>
+  <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/SQLite.svg?variant=secondary&size=sm&logo=sqlite&logoColor=003B57&mode=dark" /><img alt="SQLite" src="https://shieldcn.dev/badge/SQLite.svg?variant=secondary&size=sm&logo=sqlite&logoColor=003B57&mode=light" /></picture>
+  <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/gRPC.svg?variant=secondary&size=sm&logo=grpc&logoColor=6C4A9B&mode=dark" /><img alt="gRPC" src="https://shieldcn.dev/badge/gRPC.svg?variant=secondary&size=sm&logo=grpc&logoColor=6C4A9B&mode=light" /></picture>
+  <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Linux.svg?variant=secondary&size=sm&logo=linux&logoColor=FCC624&mode=dark" /><img alt="Linux" src="https://shieldcn.dev/badge/Linux.svg?variant=secondary&size=sm&logo=linux&logoColor=FCC624&mode=light" /></picture>
+  <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/AGPLv3.svg?variant=secondary&size=sm&logo=gnu&logoColor=A42E2B&mode=dark" /><img alt="AGPL-3.0" src="https://shieldcn.dev/badge/AGPLv3.svg?variant=secondary&size=sm&logo=gnu&logoColor=A42E2B&mode=light" /></picture>
+</p>
 
-ZMP is one protocol and one message model. It is designed for backend services, sensors, gateways, and edge applications without requiring separate protocol clients in the native path. Existing custom, NATS-compatible, and MQTT-compatible listeners remain available for migration and interoperability.
+**zigmq** is a small TCP message broker written in Zig. The `0.4.0` release introduces **ZigMV (Zig Message Protocol)** as the native unified protocol inspired by the useful parts of NATS and MQTT 5.0.
 
-> This is a beta release. The current native ZMP implementation provides the `live` profile. Durable delivery, retained state, work groups, and stronger recovery are specified and staged for later releases.
+ZigMV uses one protocol and one message model for backend services, sensors, gateways, and edge applications. The native path provides live telemetry, work groups, durable delivery, and retained state without requiring separate client libraries. Existing custom, NATS-compatible, and MQTT-compatible listeners remain available as migration surfaces.
+
+> The project is now preparing the `0.5.0` security and edge-transfer train. Native TLS/mTLS and remote edge-link transfer remain gated work; the currently implemented security foundation includes authentication, subject ACLs, subscription limits, and per-client publish rate limits.
+
 
 ## Why zigmq?
 
@@ -34,7 +44,7 @@ ZMP is one protocol and one message model. It is designed for backend services, 
 
 ### Download a beta binary
 
-Open the [0.2.0-beta.1 release](https://github.com/sudo-su-coffee/zigmq/releases/tag/v0.2.0-beta.1) and download the archive for your platform when available.
+Open the [0.4.0 release](https://github.com/sudo-su-coffee/zigmq/releases/tag/v0.4.0) and download the archive for your platform when available.
 
 ### Build from source
 
@@ -69,38 +79,69 @@ zig build run -- --version
 zig build run -- --help
 ```
 
-The server prints `zigmq 0.2.0-beta.1` for the version command.
+The current stable release train reports `zigmq 0.4.0` for the version command; the next security work is being developed toward `0.5.0`.
 
-## Native ZMP
+## Native ZigMV
 
 Start the native unified protocol:
 
 ```sh
-zig build run -- --protocol zmp --port 4222
+zig build run -- --protocol zigmv --port 4222
 ```
 
-ZMP uses one canonical subject space and explicit delivery profiles:
+ZigMV uses one canonical subject space and explicit delivery profiles:
 
 | Profile | Current status | Intended use |
 | --- | --- | --- |
 | `live` | Implemented | Low-latency, volatile, at-most-once delivery |
-| `work` | Planned | One-of-N consumer-group delivery |
-| `durable` | Planned | ACK, retry, expiry, and restart recovery |
-| `state` | Planned | Retained last-value device state |
-| `exact` | Planned | Deduplicated durable delivery after crash testing |
+| `work` | Implemented | One-of-N consumer-group delivery |
+| `durable` | Implemented foundation | Delivery IDs, ACK removal, expiry, and local stream append |
+| `state` | Implemented foundation | Retained last-value device state |
+| `exact` | Explicitly rejected | Reserved for proven deduplication and crash recovery |
 
 Subscribe and publish with the current `live` profile:
 
 ```text
-ZMP/1 SUB live sensors.room1.temperature\r\n
-ZMP/1 OK SUB\r\n
+ZMV/1 SUB live sensors.room1.temperature\r\n
+ZMV/1 OK SUB\r\n
 
-ZMP/1 PUB live 1 sensors.room1.temperature 4\r\n
+ZMV/1 PUB live 1 sensors.room1.temperature 4\r\n
 21.5\r\n
-ZMP/1 OK PUB 1\r\n
+ZMV/1 OK PUB 1\r\n
 ```
 
-ZMP is specified in [`docs/ZMP_PROTOCOL.md`](docs/ZMP_PROTOCOL.md). The routing design is called **Adaptive Delivery Routing (ADR)**: normalize one message, authorize it, match subscriptions once, then apply the selected delivery profile without a NATS-to-MQTT bridge in the hot path.
+ZigMV is specified in [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md). Its routing design is called **Adaptive Delivery and Transfer (ADT)**: authenticate the connection, authorize the subject, match subscriptions once, then apply the selected delivery profile without a NATS-to-MQTT bridge in the hot path.
+
+For a bounded native deployment, configure authentication and subject-level controls at startup:
+
+```sh
+zig build run -- --protocol zigmv --auth-token-file ./edge.token \\
+  --publish-allow telemetry.* --subscribe-allow telemetry.* \\
+  --publish-rate-limit 100
+```
+
+A client authenticates before using ZigMV operations:
+
+```text
+ZMV/1 AUTH edge-secret\r\n
+ZMV/1 OK AUTH\r\n
+```
+
+### Native throughput benchmark
+
+Run the sustained benchmark against a ReleaseFast binary:
+
+```sh
+zig build -Doptimize=ReleaseFast
+./zig-out/bin/zigmq --protocol zigmv --port 4222
+python3 scripts/benchmark_zigmv.py --port 4222 \\
+  --duration 10 --target-mps 100000000 --payload-size 32 \\
+  --drain-timeout 30
+```
+
+The benchmark reports the offered target, successfully written messages, broker-acknowledged messages when `--ack-publishes` is enabled, delivered messages, gaps, duplicates, invalid frames, loss, and backpressure events. A `100000000` target is an **offered-rate stress target**, not a guaranteed result. The benchmark passes only when accepted and delivered counts match with zero integrity errors. Use `--ack-publishes` when measuring broker-confirmed acceptance rather than merely bytes written to the publisher socket.
+
+The client mailbox remains bounded. When a consumer cannot keep up, the broker applies producer backpressure instead of allowing unbounded memory growth. This makes the delivered-rate and loss fields more meaningful than a raw publisher loop rate.
 
 ## Existing protocol surfaces
 
@@ -111,9 +152,9 @@ The existing listeners are useful when integrating current applications:
 | Custom | `zig build run -- --protocol custom` | zigmq examples and simple scripts |
 | NATS-compatible | `zig build run -- --protocol nats` | Small NATS-style service clients |
 | MQTT-compatible | `zig build run -- --protocol mqtt --port 1883` | MQTT device and gateway clients |
-| ZMP | `zig build run -- --protocol zmp` | New unified cloud/IoT/edge clients |
+| ZigMV | `zig build run -- --protocol zigmv` | New unified cloud/IoT/edge clients |
 
-The compatibility listeners are intentionally smaller than full NATS or MQTT 5.0 implementations. ZMP is the new native protocol direction; compatibility support is maintained separately so it does not make the core message path unnecessarily complex.
+The compatibility listeners are intentionally smaller than full NATS or MQTT 5.0 implementations. ZigMV is the native protocol direction; compatibility support is maintained separately so it does not make the core message path unnecessarily complex.
 
 ## Custom protocol example
 
@@ -171,17 +212,17 @@ python3 scripts/security_hardening_test.py --binary ./zig-out/bin/zigmq
 
 ## Benchmarks
 
-Start a ZMP-compatible server and measure live publish acknowledgements and fan-out delivery:
+Start a native ZigMV server and measure live publish acknowledgements and fan-out delivery:
 
 ```sh
 zig build run -- --protocol zigmv --port 4222
-python3 scripts/benchmark_zmp.py --messages 10000 --subscribers 10 --payload-size 128 --pipeline 1 --ack-publishes
+python3 scripts/benchmark_zigmv.py --duration 10 --target-mps 35000 --payload-size 128 --ack-publishes
 ```
 
 That command measures acknowledged publish throughput. For NATS-like one-way live telemetry, omit publisher acknowledgements:
 
 ```sh
-python3 scripts/benchmark_zmp.py --messages 10000 --subscribers 10 --payload-size 128 --pipeline 1
+python3 scripts/benchmark_zigmv.py --duration 10 --target-mps 35000 --payload-size 128
 ```
 
 Use `--ack-publishes` when you want the acknowledged comparison. Run the matrix with payload sizes of 16, 128, and 1,024 bytes and subscriber counts of 1, 10, and 50. Record the commit, Zig version, optimization mode, CPU, memory, operating system, publish mode, publish rate, delivery rate, and latency. Benchmark numbers are machine-specific and are not performance guarantees.
@@ -227,14 +268,11 @@ Read the design first: [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md).
 | Document | Purpose |
 | --- | --- |
 | [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) | Short installation and first-message guide |
-| [`docs/ZMP_PROTOCOL.md`](docs/ZMP_PROTOCOL.md) | ZMP beta wire format and semantics |
 | [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md) | ZigMV protocol, ADT algorithm, transfer model, and release gates |
-| [`docs/ZMP_V0.2.0_PLAN.md`](docs/ZMP_V0.2.0_PLAN.md) | ZMP beta roadmap and staged delivery profiles |
-| [`docs/ZIGMV_RELEASE_PLAN.md`](docs/ZIGMV_RELEASE_PLAN.md) | ZigMV 0.3.0 and 1.0.0-beta release gates |
+| [`docs/ZIGMV_COMPARISON_FINDINGS.md`](docs/ZIGMV_COMPARISON_FINDINGS.md) | NATS and MQTT capability comparison and ZigMV implications |
+| [`docs/ZIGMV_BENCHMARK_0.5.0.md`](docs/ZIGMV_BENCHMARK_0.5.0.md) | Reproducible 0.5.0 benchmark and validation evidence |
+| [`docs/ZIGMV_RELEASE_PLAN.md`](docs/ZIGMV_RELEASE_PLAN.md) | ZigMV release gates and delivery-guarantee boundaries |
 | [`docs/ZIGMV_ROADMAP.md`](docs/ZIGMV_ROADMAP.md) | Grouped release trains from 0.4.0 to 1.0.0-beta |
-| [`docs/ZMP_LIVE_TEST_PLAN.md`](docs/ZMP_LIVE_TEST_PLAN.md) | Live-profile acceptance gates and test matrix |
-| [`docs/ZMP_LIVE_BENCHMARK_2026-08-16.md`](docs/ZMP_LIVE_BENCHMARK_2026-08-16.md) | Recorded beta benchmark results and gate decision |
-| [`docs/RELEASE_0.2.0-beta.1.md`](docs/RELEASE_0.2.0-beta.1.md) | Previous beta release notes and known limitations |
 | [`docs/RELEASE_0.4.0.md`](docs/RELEASE_0.4.0.md) | Grouped 0.4.0 ZigMV release notes and guarantees |
 | [`CHANGELOG.md`](CHANGELOG.md) | Version history |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution and test workflow |
@@ -242,10 +280,9 @@ Read the design first: [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md).
 ## Project structure
 
 ```text
-src/main.zig       broker, listeners, and CLI
+src/main.zig       broker, listeners, and ZigMV handlers
 src/root.zig       shared limits, parser helpers, and version
-src/zmp.zig        ZMP parser, encoder, and compatibility tests
-src/zigmv_state.zig ACK, retry, and deduplication state primitives
+src/zigmv_state.zig delivery state primitives and ACK tracking
 scripts/            integration tests and benchmarks
 docs/               protocol, release, and user documentation
 assets/             project branding

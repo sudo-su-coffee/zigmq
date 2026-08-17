@@ -478,7 +478,7 @@ const Broker = struct {
     fn deliverCustom(self: *Broker, client: *Client, profile: []const u8, topic: []const u8, reply: ?[]const u8, payload: []const u8) void {
         if (client.last_delivery_generation == self.delivery_generation) return;
         client.last_delivery_generation = self.delivery_generation;
-        if (client.zmp_client)
+        if (client.zmp_client or client.zigmv_client)
             client.sendZmpMessage(profile, topic, payload) catch |err| std.log.debug("zmp delivery failed: {s}", .{@errorName(err)})
         else
             client.sendCustomMessage(topic, reply, payload) catch |err| std.log.debug("custom delivery failed: {s}", .{@errorName(err)});

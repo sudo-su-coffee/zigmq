@@ -321,6 +321,8 @@ const Broker = struct {
     publish_allow: ?[]const u8,
     subscribe_allow: ?[]const u8,
     publish_rate_limit: u32,
+    max_clients: usize,
+    max_subscriptions_per_client: usize,
     mutex: std.Thread.Mutex = .{},
     clients: std.ArrayList(*Client) = .empty,
     exact_subscribers: std.StringHashMap(std.ArrayList(*Client)),
@@ -339,7 +341,7 @@ const Broker = struct {
     stats: BrokerStats = .{},
     delivery_generation: usize = 0,
 
-    fn init(allocator: Allocator, protocol: Protocol, host: []const u8, port: u16, auth_token: ?[]const u8, publish_allow: ?[]const u8, subscribe_allow: ?[]const u8, publish_rate_limit: u32, stream_file: ?std.fs.File, session_journal: ?persist.Journal) Broker {
+    fn init(allocator: Allocator, protocol: Protocol, host: []const u8, port: u16, auth_token: ?[]const u8, publish_allow: ?[]const u8, subscribe_allow: ?[]const u8, publish_rate_limit: u32, max_clients: usize, max_subscriptions_per_client: usize, stream_file: ?std.fs.File, session_journal: ?persist.Journal) Broker {
         return .{
             .allocator = allocator,
             .protocol = protocol,
@@ -349,6 +351,8 @@ const Broker = struct {
             .publish_allow = publish_allow,
             .subscribe_allow = subscribe_allow,
             .publish_rate_limit = publish_rate_limit,
+            .max_clients = max_clients,
+            .max_subscriptions_per_client = max_subscriptions_per_client,
             .exact_subscribers = std.StringHashMap(std.ArrayList(*Client)).init(allocator),
             .group_subscribers = std.StringHashMap(GroupBucket).init(allocator),
             .nats_subscribers = std.StringHashMap(std.ArrayList(NatsSubscriptionRef)).init(allocator),
@@ -435,7 +439,7 @@ const Broker = struct {
     fn addClient(self: *Broker, client: *Client) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        if (self.clients.items.len >= zigmq.max_clients) {
+        if (self.clients.items.len >= self.max_clients) {
             self.stats.rejected_clients += 1;
             return error.TooManyClients;
         }
@@ -738,7 +742,7 @@ const Broker = struct {
     fn subscribeZigmv(self: *Broker, client: *Client, profile: []const u8, subject: []const u8, group: ?[]const u8) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        if (self.zigmv_subscriptions.items.len >= zigmq.max_subscriptions_per_client * zigmq.max_clients) return error.TooManySubscriptions;
+        if (self.zigmv_subscriptions.items.len >= self.max_subscriptions_per_client * self.max_clients) return error.TooManySubscriptions;
         for (self.zigmv_subscriptions.items) |subscription| {
             if (subscription.client == client and std.mem.eql(u8, subscription.profile, profile) and std.mem.eql(u8, subscription.subject, subject)) return error.DuplicateSubscription;
         }
@@ -1035,7 +1039,7 @@ const Broker = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         if (client.subscriptions.contains(subject)) return false;
-        if (client.subscriptions.count() >= zigmq.max_subscriptions_per_client) return error.TooManySubscriptions;
+        if (client.subscriptions.count() >= self.max_subscriptions_per_client) return error.TooManySubscriptions;
         const copy = try self.allocator.dupe(u8, subject);
         errdefer self.allocator.free(copy);
         const group_copy = if (group) |value| try self.allocator.dupe(u8, value) else null;
@@ -1854,6 +1858,8 @@ pub fn main() !void {
     var subscribe_allow: ?[]const u8 = null;
     var publish_rate_limit: u32 = 0;
     var metrics_port: u16 = 0;
+    var max_clients: usize = zigmq.max_clients;
+    var max_subscriptions_per_client: usize = zigmq.max_subscriptions_per_client;
     var auth_token_owned: ?[]u8 = null;
     defer if (auth_token_owned) |token| {
         std.crypto.secureZero(u8, token);
@@ -1898,6 +1904,16 @@ pub fn main() !void {
             index += 1;
             if (index >= args.len) return error.MissingPublishRateLimit;
             publish_rate_limit = std.fmt.parseInt(u32, args[index], 10) catch return error.InvalidPublishRateLimit;
+        } else if (std.mem.eql(u8, args[index], "--max-clients")) {
+            index += 1;
+            if (index >= args.len) return error.MissingMaxClients;
+            max_clients = std.fmt.parseInt(usize, args[index], 10) catch return error.InvalidMaxClients;
+            if (max_clients == 0 or max_clients > zigmq.max_clients) return error.InvalidMaxClients;
+        } else if (std.mem.eql(u8, args[index], "--max-subscriptions")) {
+            index += 1;
+            if (index >= args.len) return error.MissingMaxSubscriptions;
+            max_subscriptions_per_client = std.fmt.parseInt(usize, args[index], 10) catch return error.InvalidMaxSubscriptions;
+            if (max_subscriptions_per_client == 0 or max_subscriptions_per_client > zigmq.max_subscriptions_per_client) return error.InvalidMaxSubscriptions;
         } else if (std.mem.eql(u8, args[index], "--metrics-port")) {
             index += 1;
             if (index >= args.len) return error.MissingMetricsPort;
@@ -1914,7 +1930,7 @@ pub fn main() !void {
             std.debug.print("zigmq {s}\n", .{zigmq.version});
             return;
         } else if (std.mem.eql(u8, args[index], "--help")) {
-            std.debug.print("zigmq {s}\nUsage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats|mqtt|zmp|zigmv] [--auth-token token|--auth-token-file path] [--allow-insecure-remote] [--publish-allow subject[,subject...]] [--subscribe-allow subject[,subject...]] [--publish-rate-limit messages_per_second] [--metrics-port port] [--stream path] [--session-store path]\n", .{zigmq.version});
+            std.debug.print("zigmq {s}\nUsage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats|mqtt|zmp|zigmv] [--auth-token token|--auth-token-file path] [--allow-insecure-remote] [--publish-allow subject[,subject...]] [--subscribe-allow subject[,subject...]] [--publish-rate-limit messages_per_second] [--max-clients count] [--max-subscriptions count] [--metrics-port port] [--stream path] [--session-store path]\n", .{zigmq.version});
             return;
         } else {
             std.debug.print("Unknown argument: {s}\n", .{args[index]});
@@ -1955,7 +1971,7 @@ pub fn main() !void {
         try file.chmod(0o600);
         session_journal = try persist.Journal.open(allocator, file);
     }
-    var broker = Broker.init(allocator, protocol, host, port, auth_token, publish_allow, subscribe_allow, publish_rate_limit, stream_file, session_journal);
+    var broker = Broker.init(allocator, protocol, host, port, auth_token, publish_allow, subscribe_allow, publish_rate_limit, max_clients, max_subscriptions_per_client, stream_file, session_journal);
     defer broker.deinit();
     try broker.recoverStreamSequence();
     try broker.recoverSessionJournal();

@@ -71,3 +71,6 @@ jobs:
 
       - name: Security hardening regression
         run: python3 scripts/security_hardening_test.py --binary ./zig-out/bin/zigmq
+
+      - name: Release gate consistency
+        run: python3 scripts/release_gate_check.py --root . --expected-version 0.6.0

@@ -1,4 +1,4 @@
-# zigmq
+# zigmq / ZigMV
 
 <p align="center">
   <img src="assets/zigmq-logo.svg" alt="zigmq logo" width="180">
@@ -186,12 +186,23 @@ python3 scripts/benchmark_zmp.py --messages 10000 --subscribers 10 --payload-siz
 
 Use `--ack-publishes` when you want the acknowledged comparison. Run the matrix with payload sizes of 16, 128, and 1,024 bytes and subscriber counts of 1, 10, and 50. Record the commit, Zig version, optimization mode, CPU, memory, operating system, publish mode, publish rate, delivery rate, and latency. Benchmark numbers are machine-specific and are not performance guarantees.
 
+## ZigMV direction
+
+The next protocol generation is **ZigMV**: one lightweight message protocol and one Adaptive Delivery and Transfer algorithm for cloud services, IoT devices, and edge gateways. It combines NATS-like low-latency subjects, request/reply, and work sharing with MQTT-like device sessions, retained state, expiry, and stronger delivery profiles. It is a new protocol, not two protocol implementations joined by a bridge.
+
+The current `0.2.0-beta.1` line contains the ZMP/ADR foundation and the implemented `live` profile. The `0.3.0` line will stabilize the `ZMV/1` name and begin the `work` profile. The `1.0.0-beta` gate requires durable recovery, state retention, security, edge transfer, compatibility tests, and documented failure guarantees.
+
+The project boundaries remain intentional. `zigkv` owns Redis-compatible data structures; `nammapush-rs` owns notification delivery and provider fallback; zigmq/ZigMV owns transport, routing, delivery state, and edge messaging.
+
+Read the design first: [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md).
+
 ## Documentation
 
 | Document | Purpose |
 | --- | --- |
 | [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) | Short installation and first-message guide |
-| [`docs/ZMP_PROTOCOL.md`](docs/ZMP_PROTOCOL.md) | Native ZMP wire format and semantics |
+| [`docs/ZMP_PROTOCOL.md`](docs/ZMP_PROTOCOL.md) | ZMP beta wire format and semantics |
+| [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md) | ZigMV protocol, ADT algorithm, transfer model, and release gates |
 | [`docs/ZMP_V0.2.0_PLAN.md`](docs/ZMP_V0.2.0_PLAN.md) | ADR roadmap and staged delivery profiles |
 | [`docs/ZMP_LIVE_TEST_PLAN.md`](docs/ZMP_LIVE_TEST_PLAN.md) | Live-profile acceptance gates and test matrix |
 | [`docs/ZMP_LIVE_BENCHMARK_2026-08-16.md`](docs/ZMP_LIVE_BENCHMARK_2026-08-16.md) | Recorded beta benchmark results and gate decision |

@@ -11,10 +11,19 @@ ZigMV follows grouped release trains. A version is released only when its implem
 | --- | --- | --- |
 | 0.6.0 | Profiles, native auth and ACLs, rate limits, STATS, bounded durable redelivery, publish idempotency window, self-hosted docs | Version gate, Zig tests, integration tests, benchmark integrity, docs navigation. |
 | 0.7.0 | Persistent durable sessions and crash-safe recovery | Restart tests for append, ACK, cursor, expiry, replay, duplicate suppression, and corruption handling. |
-| 0.8.0 | Edge links and reconnect semantics | TLS/mTLS, identity, export/import filters, reconnect backoff, bounded offline queues, lag and retry metrics. |
+| 0.8.0 | Edge links and reconnect semantics | TLS/mTLS, identity, export/import filters, reconnect backoff, bounded offline queues, lag and retry metrics. The current code now includes the filter, bounded queue, sequence, and backoff foundation; transport and broker-link integration remain gated. |
 | 0.9.0 | Performance and protocol hardening | Routing-index benchmark, compiled multi-publisher client, fuzzing, soak tests, memory/CPU budgets, adapter overhead report. |
 | 0.10.0 | Compatibility completion | MQTT 5.0 mapping matrix, NATS core and JetStream boundary tests, request/reply, shared groups, retained/state behavior. |
+| 0.11.0 | Storage and retention hardening | Compaction, snapshots, expiry sweeps, corruption recovery, disk-full behavior, and storage benchmarks. |
+| 0.12.0 | Operations and tenancy | Structured metrics, admin boundaries, tenant quotas, per-tenant ACLs, credential rotation, and audit-safe logs. |
+| 0.13.0 | High availability foundations | Replication protocol, leader/peer health, failover drills, snapshot transfer, and explicit consistency boundaries. |
+| 0.14.0 | Interoperability and client SDKs | Versioned adapters, conformance vectors, client examples, upgrade compatibility, and protocol negotiation. |
+| 0.15.0 | Beta hardening | Fuzzing, soak tests, performance budgets, security review, release reproducibility, and migration/rollback drills. |
 | 1.0.0-beta | Release candidate stabilization | No open P0/P1 defects, reproducible release artifacts, security review, recovery drill, migration guide, and signed benchmark evidence. |
+
+## 0.8.0 implementation sequence
+
+The edge-forwarding foundation uses explicit export filters, monotonic local sequence numbers, bounded queue items and bytes, and capped exponential reconnect backoff. The next integration gate is an authenticated link envelope with TLS/mTLS, link identity, import filters, reconnect cursor transfer, lag metrics, and deterministic drop behavior when the offline queue is full.
 
 ## 0.7.0 implementation sequence
 

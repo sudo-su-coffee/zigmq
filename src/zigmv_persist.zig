@@ -87,7 +87,7 @@ pub const Journal = struct {
             self.allocator.free(value.subject);
             self.allocator.free(value.payload);
         }
-        if (self.deliveries.fetchPut(message_id, value)) |old| {
+        if (try self.deliveries.fetchPut(message_id, value)) |old| {
             self.allocator.free(old.value.session_id);
             self.allocator.free(old.value.subject);
             self.allocator.free(old.value.payload);

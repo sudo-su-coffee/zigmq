@@ -27,7 +27,19 @@ jobs:
         run: zig build
 
       - name: Version metadata
-        run: ./zig-out/bin/zigmq --version 2>&1 | grep -F 'zigmq 0.6.0'
+        run: ./zig-out/bin/zigmq --version 2>&1 | grep -F 'zigmq 1.0.0-beta.1'
+
+      - name: Generate ephemeral mTLS test certificates
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/zigmv-tls
+          cd /tmp/zigmv-tls
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout ca.key -out ca.crt -days 1 -subj '/CN=ZigMV CI CA' >/dev/null 2>&1
+          openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout server.key -out server.csr -subj '/CN=127.0.0.1' >/dev/null 2>&1
+          openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days 1 -sha256 >/dev/null 2>&1
+          cp server.key client.key
+          cp server.crt client.crt
 
       - name: ZigMV smoke test
         run: python3 scripts/zigmv_test.py --binary ./zig-out/bin/zigmq --port 4230
@@ -47,6 +59,15 @@ jobs:
 
       - name: Edge feature tests
         run: python3 scripts/edge_features_test.py --binary ./zig-out/bin/zigmq
+
+      - name: Broker-to-broker edge bridge
+        run: python3 scripts/edge_broker_bridge_test.py --binary ./zig-out/bin/zigmq
+
+      - name: TLS and mTLS runtime gate
+        run: python3 scripts/tls_mtls_test.py --binary ./zig-out/bin/zigmq --ca /tmp/zigmv-tls/ca.crt --server-cert /tmp/zigmv-tls/server.crt --server-key /tmp/zigmv-tls/server.key --client-cert /tmp/zigmv-tls/client.crt --client-key /tmp/zigmv-tls/client.key --port 4240
+
+      - name: Secure edge bridge
+        run: python3 scripts/secure_edge_bridge_test.py --binary ./zig-out/bin/zigmq --ca /tmp/zigmv-tls/ca.crt --cert /tmp/zigmv-tls/server.crt --key /tmp/zigmv-tls/server.key --port-a 4241 --port-b 4242
 
       - name: Durable stream tests
         run: python3 scripts/stream_test.py --binary ./zig-out/bin/zigmq
@@ -72,8 +93,11 @@ jobs:
       - name: Security hardening regression
         run: python3 scripts/security_hardening_test.py --binary ./zig-out/bin/zigmq
 
+      - name: Hostile input resilience
+        run: python3 scripts/protocol_hostile_input_test.py --binary ./zig-out/bin/zigmq --port 4243
+
       - name: Release gate consistency
-        run: python3 scripts/release_gate_check.py --root . --expected-version 0.6.0
+        run: python3 scripts/release_gate_check.py --root . --expected-version 1.0.0-beta.1
 
   cross-target-builds:
     runs-on: ubuntu-latest

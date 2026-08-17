@@ -41,3 +41,58 @@
 - [ ] Synchronize version metadata, changelog, README, Mintlify docs, release notes, and beta gate checker.
 - [ ] Run the complete CI, security, recovery, benchmark, soak, and packaging workflow.
 - [ ] Create a 1.0.0-beta tag only when all advertised gates pass; otherwise publish an accurately labeled development release.
+
+## Validation pause
+
+- [ ] Keep the current branch quiet and do not push additional commits or manually retrigger CI until the user explicitly requests resumption.
+- [ ] Preserve the latest completed CI evidence and inspect only the active run needed to confirm its final state.
+
+## Final release resume
+
+- [ ] Batch the remaining native release-gated changes before triggering the next CI cycle.
+- [ ] Run one consolidated final validation cycle before deciding whether a final release tag is justified.
+- [ ] Keep the final version and release notes aligned with only the capabilities supported by passing evidence.
+
+## 1.0.0 completion request
+
+- [ ] Continue implementation until the defined 1.0.0 release gates are either fully implemented and validated or explicitly documented as blockers.
+- [ ] Batch code changes before the next consolidated CI trigger and do not bump version metadata prematurely.
+- [ ] Prepare the final 1.0.0 release only after compile, integration, security, recovery, benchmark, soak, cross-target, and artifact checks pass.
+
+## Edge transport and TLS release request
+
+- [ ] Implement broker-integrated edge forwarding with bounded queues, cursor handling, reconnect, and authenticated link lifecycle.
+- [ ] Implement native TLS/mTLS configuration or document an exact build/runtime blocker if the current Zig toolchain cannot support it safely.
+- [ ] Run the complete final release validation and prepare artifacts only after all advertised gates pass.
+
+## Edge transport completion
+
+- [x] Integrate the existing LINK frame, cursor, authentication, and bounded-forwarder modules into broker-to-broker connections.
+- [x] Add real TLS/mTLS listener configuration, certificate verification, and security regression tests.
+- [ ] Do not bump to 1.0.0 or publish artifacts until edge transport and TLS/mTLS gates pass.
+
+## Accelerated v1.0.0-beta execution
+
+- [x] Replace direct net.Stream reader/writer coupling with a shared plain/TLS transport abstraction.
+- [x] Wire TLS server/client handshakes, certificate loading, CA verification, and required mTLS client authentication.
+- [ ] Run secure LINK, invalid-certificate, protocol, recovery, benchmark, soak, hostile-input, failure-injection, and cross-target gates in CI.
+- [ ] Update beta metadata, changelog, artifacts, checksums, CI, and tag only after all selected beta gates pass in CI.
+
+## Active beta implementation
+
+- [x] Implement live TLS/mTLS transport in the broker connection lifecycle rather than compile-only vendoring.
+- [x] Add certificate acceptance/rejection, secure edge-link, and regression tests.
+- [x] Re-run all beta release gates before changing version metadata or tagging.
+
+## v1.0.0 release preparation
+
+- [x] Complete TLS/mTLS listener and edge-link runtime integration with certificate verification.
+- [x] Add secure transport acceptance/rejection, certificate, compatibility, recovery, benchmark, soak, and artifact gates.
+- [ ] Synchronize v1.0.0 metadata and create the tag only after the consolidated release gate passes.
+
+## Remaining native implementation
+
+- [x] Integrate broker-to-broker forwarding into the native connection lifecycle instead of leaving it as standalone primitives.
+- [x] Wire the vendored Zig 0.15-compatible TLS server into listener/client transport, add certificate configuration, and add mTLS tests.
+- [x] Run the final release gates only after the remaining code is integrated and compiled.
+- [x] Continue this implementation run through the remaining code and validation rather than stopping at an intermediate status report.

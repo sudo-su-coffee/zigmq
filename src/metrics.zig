@@ -65,9 +65,9 @@ test "formats stable prometheus metrics" {
         .expired_total = 9,
         .rejected_clients_total = 10,
         .payload_bytes_total = 11,
-    }, "0.6.0", &buffer);
+    }, "1.0.0-beta.1", &buffer);
     try std.testing.expect(std.mem.indexOf(u8, text, "# TYPE zigmv_published_total counter") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "zigmv_pending_durable 4") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "zigmv_build_info{version=\"0.6.0\"} 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "zigmv_build_info{version=\"1.0.0-beta.1\"} 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "zigmv_rejected_clients_total 10") != null);
 }

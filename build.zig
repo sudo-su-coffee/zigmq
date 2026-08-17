@@ -28,6 +28,10 @@ pub fn build(b: *std.Build) void {
     // to our consumers. We must give it a name because a Zig package can expose
     // multiple modules and consumers will need to be able to specify which
     // module they want to access.
+    const tls_mod = b.addModule("zigmv_tls", .{
+        .root_source_file = b.path("vendor/tls/root.zig"),
+        .target = target,
+    });
     const mod = b.addModule("zigmq", .{
         // The root source file is the "entry point" of this module. Users of
         // this module will only be able to access public declarations contained
@@ -93,6 +97,7 @@ pub fn build(b: *std.Build) void {
                 // can be extremely useful in case of collisions (which can happen
                 // importing modules from different packages).
                 .{ .name = "zigmq", .module = mod },
+                .{ .name = "zigmv_tls", .module = tls_mod },
             },
         }),
     });

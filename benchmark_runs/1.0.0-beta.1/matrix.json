@@ -1,0 +1,77 @@
+{
+  "protocol": "zigmv",
+  "results": [
+    {
+      "payload_bytes": 0,
+      "messages": 1000,
+      "ack_publishes": false,
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "Traceback (most recent call last):\n  File \"/home/ubuntu/zigmq-beta/scripts/benchmark_zigmv.py\", line 195, in <module>\n    raise SystemExit(run_benchmark(args))\n                     ^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/zigmq-beta/scripts/benchmark_zigmv.py\", line 126, in run_benchmark\n    raise RuntimeError(f\"benchmark synchronization failed: {stats_line!r}\")\nRuntimeError: benchmark synchronization failed: 'ZMV/1 ERR missing_length'\n",
+      "port": 24510
+    },
+    {
+      "payload_bytes": 0,
+      "messages": 1000,
+      "ack_publishes": true,
+      "returncode": 0,
+      "stdout": "status=PASS\nprotocol=zigmv profile=live payload_bytes=0 target_mps=0.00\nduration_seconds=0.073826 drain_seconds=0.073992\noffered_messages=1000 socket_accepted_messages=1000 broker_accepted_messages=1000 delivered_messages=1000\nlost_messages=0 delivery_ratio=1.000000 gaps=0 duplicates=0 invalid_frames=0\naccepted_msg_per_sec=13545.36 delivered_msg_per_sec=13514.97\nbackpressure_events=0\npublisher_bye_sent=true\n",
+      "stderr": "",
+      "port": 24511
+    },
+    {
+      "payload_bytes": 16,
+      "messages": 1000,
+      "ack_publishes": false,
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "Traceback (most recent call last):\n  File \"/home/ubuntu/zigmq-beta/scripts/benchmark_zigmv.py\", line 195, in <module>\n    raise SystemExit(run_benchmark(args))\n                     ^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/zigmq-beta/scripts/benchmark_zigmv.py\", line 123, in run_benchmark\n    publisher.sendall(b\"ZMV/1 STATS\\r\\n\")\nBrokenPipeError: [Errno 32] Broken pipe\n",
+      "port": 24512
+    },
+    {
+      "payload_bytes": 16,
+      "messages": 1000,
+      "ack_publishes": true,
+      "returncode": 0,
+      "stdout": "status=PASS\nprotocol=zigmv profile=live payload_bytes=16 target_mps=0.00\nduration_seconds=0.074714 drain_seconds=0.074981\noffered_messages=1000 socket_accepted_messages=1000 broker_accepted_messages=1000 delivered_messages=1000\nlost_messages=0 delivery_ratio=1.000000 gaps=0 duplicates=0 invalid_frames=0\naccepted_msg_per_sec=13384.37 delivered_msg_per_sec=13336.62\nbackpressure_events=0\npublisher_bye_sent=true\n",
+      "stderr": "",
+      "port": 24513
+    },
+    {
+      "payload_bytes": 128,
+      "messages": 1000,
+      "ack_publishes": false,
+      "returncode": 2,
+      "stdout": "status=FAIL\nprotocol=zigmv profile=live payload_bytes=128 target_mps=0.00\nduration_seconds=0.045717 drain_seconds=10.055681\noffered_messages=1000 socket_accepted_messages=1000 broker_accepted_messages=1000 delivered_messages=981\nlost_messages=19 delivery_ratio=0.981000 gaps=0 duplicates=0 invalid_frames=0\naccepted_msg_per_sec=21873.68 delivered_msg_per_sec=97.56\nbackpressure_events=0\npublisher_bye_sent=true\nconsumer_error=timed out\n",
+      "stderr": "",
+      "port": 24514
+    },
+    {
+      "payload_bytes": 128,
+      "messages": 1000,
+      "ack_publishes": true,
+      "returncode": 0,
+      "stdout": "status=PASS\nprotocol=zigmv profile=live payload_bytes=128 target_mps=0.00\nduration_seconds=0.057962 drain_seconds=0.078297\noffered_messages=1000 socket_accepted_messages=1000 broker_accepted_messages=1000 delivered_messages=1000\nlost_messages=0 delivery_ratio=1.000000 gaps=0 duplicates=0 invalid_frames=0\naccepted_msg_per_sec=17252.79 delivered_msg_per_sec=12771.81\nbackpressure_events=0\npublisher_bye_sent=true\n",
+      "stderr": "",
+      "port": 24515
+    },
+    {
+      "payload_bytes": 1024,
+      "messages": 1000,
+      "ack_publishes": false,
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "Traceback (most recent call last):\n  File \"/home/ubuntu/zigmq-beta/scripts/benchmark_zigmv.py\", line 195, in <module>\n    raise SystemExit(run_benchmark(args))\n                     ^^^^^^^^^^^^^^^^^^^\n  File \"/home/ubuntu/zigmq-beta/scripts/benchmark_zigmv.py\", line 126, in run_benchmark\n    raise RuntimeError(f\"benchmark synchronization failed: {stats_line!r}\")\nRuntimeError: benchmark synchronization failed: 'ZMV/1 ERR invalid_version'\n",
+      "port": 24516
+    },
+    {
+      "payload_bytes": 1024,
+      "messages": 1000,
+      "ack_publishes": true,
+      "returncode": 0,
+      "stdout": "status=PASS\nprotocol=zigmv profile=live payload_bytes=1024 target_mps=0.00\nduration_seconds=0.083355 drain_seconds=0.134036\noffered_messages=1000 socket_accepted_messages=1000 broker_accepted_messages=1000 delivered_messages=1000\nlost_messages=0 delivery_ratio=1.000000 gaps=0 duplicates=0 invalid_frames=0\naccepted_msg_per_sec=11996.86 delivered_msg_per_sec=7460.67\nbackpressure_events=0\npublisher_bye_sent=true\n",
+      "stderr": "",
+      "port": 24517
+    }
+  ]
+}

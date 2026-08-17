@@ -21,11 +21,11 @@
   <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/AGPLv3.svg?variant=secondary&size=sm&logo=gnu&logoColor=A42E2B&mode=dark" /><img alt="AGPL-3.0" src="https://shieldcn.dev/badge/AGPLv3.svg?variant=secondary&size=sm&logo=gnu&logoColor=A42E2B&mode=light" /></picture>
 </p>
 
-**zigmq** is a small TCP message broker written in Zig. The `0.6.0` release train delivers **ZigMV (Zig Message Protocol)** as the native unified protocol inspired by the useful parts of NATS and MQTT 5.0.
+**zigmq** is a small TCP message broker written in Zig. The `1.0.0-beta.1` release train delivers **ZigMV (Zig Message Protocol)** as the native unified protocol inspired by the useful parts of NATS and MQTT 5.0.
 
 ZigMV uses one protocol and one message model for backend services, sensors, gateways, and edge applications. The native path provides live telemetry, work groups, durable delivery, and retained state without requiring separate client libraries. Existing custom, NATS-compatible, and MQTT-compatible listeners remain available as migration surfaces.
 
-> ZigMV `0.6.0` is the current development release train. It includes authentication, subject ACLs, subscription limits, per-client publish rate limits, STATS counters, bounded durable redelivery, and a publish-idempotency window. Native TLS/mTLS, persistent sessions, and remote edge-link transfer remain gated work.
+> ZigMV `1.0.0-beta.1` is the current release candidate. It includes authentication, subject ACLs, subscription limits, per-client publish rate limits, STATS counters, bounded durable redelivery, persistent session journaling, authenticated edge links, and live TLS/mTLS transport. Full MQTT 5.0 interoperability, full NATS JetStream semantics, MQTT QoS 2 parity, distributed replication, and exactly-once delivery remain non-claims.
 
 
 ## Documentation
@@ -83,7 +83,7 @@ zig build run -- --version
 zig build run -- --help
 ```
 
-The current development train reports `zigmq 0.6.0` for the version command. This branch is an unreleased 0.6.0 observability and performance bundle; do not treat it as a published tag until its PR and CI gates pass.
+The current release candidate reports `zigmq 1.0.0-beta.1` for the version command. This branch remains an unreleased beta candidate until its complete CI, artifact, benchmark, and documentation gates pass.
 
 ## Native ZigMV
 
@@ -170,7 +170,7 @@ ZigMV is different from NATS and MQTT rather than being a drop-in replacement. I
 
 ![ZigMV edge architecture](docs/ZIGMV_EDGE_ARCHITECTURE.png)
 
-The local broker keeps volatile traffic close to devices, applies ACLs and bounded mailboxes, stores only configured durable/state data, and forwards selected subjects through a future authenticated edge link. The edge link design includes reconnect backoff, cursor transfer, bounded offline queues, lag, retry, and drop metrics, but native TLS/mTLS and remote offline transfer remain release gates rather than current guarantees.
+The local broker keeps volatile traffic close to devices, applies ACLs and bounded mailboxes, stores only configured durable/state data, and forwards selected subjects through an authenticated TLS-capable edge link. The edge link includes reconnect backoff, cursor transfer, bounded queues, lag, retry, and drop metrics; offline transfer semantics remain bounded and explicitly scoped.
 
 ## Custom protocol example
 
@@ -205,7 +205,7 @@ For a small trusted deployment, use a token file:
 zig build run -- --auth-token-file ./data/zigmq.token
 ```
 
-The beta has bounded resources to protect small edge systems: 1,024 clients, 1,024 subscriptions per client, eight unauthenticated commands, and bounded per-client queues. The current TCP transport is plaintext; put it behind a protected network or TLS-terminating proxy until native TLS is added.
+The beta has bounded resources to protect small edge systems: 1,024 clients, 1,024 subscriptions per client, eight unauthenticated commands, and bounded per-client queues. Use `--tls-cert`, `--tls-key`, `--tls-client-ca`, and `--tls-require-client-cert` for certificate-authenticated transport; plaintext remains available only when explicitly selected by deployment policy.
 
 ## Tests
 

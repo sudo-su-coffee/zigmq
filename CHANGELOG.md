@@ -2,6 +2,25 @@
 
 All notable changes to zigmq are documented here.
 
+## [1.0.0-beta.1] - Unreleased
+
+### Added
+
+- Live TLS 1.3 listener transport with certificate and private-key loading.
+- Required client-certificate mTLS verification against a configured CA bundle.
+- Shared plain/TLS protocol transport for native ZigMV, MQTT, NATS, and custom listeners.
+- TLS-authenticated outbound edge links with peer verification and client certificates.
+- Automated TLS/mTLS runtime rejection, acceptance, native protocol, and secure edge-bridge gates.
+
+### Validation status
+
+- Native unit, smoke, end-to-end, security, session-recovery, edge-link, TLS/mTLS, and secure edge-bridge gates pass locally on Zig 0.15.2.
+- Full benchmark, soak, fuzz, compatibility, cross-target, artifact, and CI release evidence remains required before a final stable 1.0.0 tag.
+
+### Known limitations
+
+- This beta candidate does not claim full MQTT 5.0 interoperability, full NATS JetStream semantics, MQTT QoS 2 parity, distributed replication, or exactly-once delivery.
+
 ## [0.6.0] - Unreleased
 
 ### Added

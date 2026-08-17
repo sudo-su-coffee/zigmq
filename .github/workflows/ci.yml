@@ -74,3 +74,29 @@ jobs:
 
       - name: Release gate consistency
         run: python3 scripts/release_gate_check.py --root . --expected-version 0.6.0
+
+  cross-target-builds:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-aarch64-musl
+            target: aarch64-linux-musl
+          - name: linux-armv7-musleabihf
+            target: arm-linux-musleabihf
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Zig 0.15.2
+        shell: bash
+        run: |
+          curl -fsSL https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz -o /tmp/zig.tar.xz
+          tar -xJf /tmp/zig.tar.xz -C /tmp
+          echo "/tmp/zig-x86_64-linux-0.15.2" >> "$GITHUB_PATH"
+      - name: Build ${{ matrix.name }} ReleaseSafe
+        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe
+      - name: Build ${{ matrix.name }} ReleaseFast
+        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
+      - name: Verify artifact exists
+        run: test -x zig-out/bin/zigmq

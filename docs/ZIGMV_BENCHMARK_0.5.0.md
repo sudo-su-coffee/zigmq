@@ -91,6 +91,27 @@ The acknowledged rate is limited by the Python benchmark client and per-message 
 | `scripts/security_hardening_test.py` | `SECURITY_HARDENING_OK` |
 | `scripts/realtime_scenarios.py` | `REALTIME_SCENARIOS_OK` |
 
+## Durable redelivery validation
+
+The native ZigMV smoke test now publishes an unacknowledged durable message, waits for the retry deadline, verifies a second delivery with the same delivery ID and intact payload, then acknowledges it. No further retry is expected after the ACK. This proves connected-session redelivery only; it does not prove reconnect, restart, or offline-session recovery.
+
+## Historical capacity and scenario evidence
+
+| Workload | Recorded result |
+| --- | ---: |
+| Publish ACK capacity | 23,563.4 msg/s |
+| 50-subscriber fan-out source rate | 1,781.3 msg/s |
+| 50-subscriber fan-out deliveries | 89,066.7 deliveries/s |
+| Volatile publish ACK without stream | 36,618.7 msg/s |
+| Publish ACK with local stream | 6,294.2 msg/s |
+| Stream relative rate | 17.2% |
+| Realtime telemetry | 20,424.8 msg/s |
+| Realtime alert burst | 18,253.4 events/s |
+| Realtime command-control | 2,731.1 commands/s |
+| Realtime consumer group | 882.4 msg/s with three members |
+
+These results are local historical artifacts for regression comparison. They do not establish a universal capacity target and must be rerun on deployment hardware.
+
 ## Remaining performance gates
 
-The next performance work should replace the Python publisher with a compiled multi-publisher client, add latency histograms, expose queue occupancy and blocked-publisher time, benchmark payload sizes from 0 bytes to 64 KiB, and compare 1, 10, 50, and 100 subscribers. The broker must report accepted, queued, delivered, lost, duplicate, and retry counts separately before a throughput claim is considered release evidence.
+The next performance work should replace the Python publisher with a compiled multi-publisher client, add latency histograms, expose queue occupancy and blocked-publisher time, benchmark payload sizes from 0 bytes to 64 KiB, and compare 1, 10, 50, and 100 subscribers. The broker must report accepted, queued, delivered, lost, duplicate, and retry counts separately before a throughput claim is considered release evidence. The complete implementation and release checklist is [`ZIGMV_BETA_RELEASE_GATES.md`](ZIGMV_BETA_RELEASE_GATES.md).

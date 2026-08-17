@@ -239,6 +239,25 @@ python3 scripts/benchmark_zigmv.py --duration 10 --target-mps 35000 --payload-si
 
 Use `--ack-publishes` when you want the acknowledged comparison. Run the matrix with payload sizes of 16, 128, and 1,024 bytes and subscriber counts of 1, 10, and 50. Record the commit, Zig version, optimization mode, CPU, memory, operating system, publish mode, publish rate, delivery rate, and latency. Benchmark numbers are machine-specific and are not performance guarantees.
 
+### Recorded benchmark evidence
+
+The following values are real local benchmark artifacts stored under [`benchmark_runs/`](benchmark_runs/) and consolidated in [`docs/ZIGMV_BETA_RELEASE_GATES.md`](docs/ZIGMV_BETA_RELEASE_GATES.md). They are evidence for comparison and regression tracking, not universal capacity guarantees.
+
+| Workload | Recorded result |
+| --- | ---: |
+| Publish ACK capacity | **23,563.4 msg/s** |
+| 50-subscriber fan-out source rate | **1,781.3 msg/s** |
+| 50-subscriber fan-out deliveries | **89,066.7 deliveries/s** |
+| Volatile publish ACK without stream | **36,618.7 msg/s** |
+| Publish ACK with local stream | **6,294.2 msg/s** |
+| Stream relative rate | **17.2%** of the no-stream rate |
+| Realtime telemetry | **20,424.8 msg/s** |
+| Realtime alert burst | **18,253.4 events/s** |
+| Realtime command-control | **2,731.1 commands/s** |
+| Realtime consumer group | **882.4 msg/s** with three members |
+
+The explicit 100M messages/sec run is an offered-rate stress target, not an achieved end-to-end guarantee. A valid lossless result must separately show accepted, delivered, and acknowledged counts with zero gaps, duplicates, invalid frames, and unexplained expiry.
+
 ## Try ZigMV
 
 Start the native unified protocol listener:
@@ -286,6 +305,7 @@ Read the design first: [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md).
 | [`docs/ZIGMV_EDGE_ARCHITECTURE.mmd`](docs/ZIGMV_EDGE_ARCHITECTURE.mmd) | Source flow diagram for device, edge, cloud, and compatibility paths |
 | [`docs/ZIGMV_EDGE_ARCHITECTURE.png`](docs/ZIGMV_EDGE_ARCHITECTURE.png) | Rendered edge architecture diagram |
 | [`docs/ZIGMV_RELEASE_PLAN.md`](docs/ZIGMV_RELEASE_PLAN.md) | ZigMV release gates and delivery-guarantee boundaries |
+| [`docs/ZIGMV_BETA_RELEASE_GATES.md`](docs/ZIGMV_BETA_RELEASE_GATES.md) | Complete 0.5.0-to-1.0.0-beta implementation, benchmark, and release checklist |
 | [`docs/ZIGMV_ROADMAP.md`](docs/ZIGMV_ROADMAP.md) | Grouped release trains from 0.4.0 to 1.0.0-beta |
 | [`docs/RELEASE_0.4.0.md`](docs/RELEASE_0.4.0.md) | Grouped 0.4.0 ZigMV release notes and guarantees |
 | [`CHANGELOG.md`](CHANGELOG.md) | Version history |

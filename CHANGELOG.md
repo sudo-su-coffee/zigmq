@@ -26,10 +26,12 @@ All notable changes to zigmq are documented here.
 - README usage now reflects ZigMV naming, implemented delivery profiles, the 0.4.0 baseline, the 0.5.0 security configuration, practical use cases, and the edge architecture flow.
 - Added `docs/ZIGMV_EDGE_ARCHITECTURE.mmd` and its rendered PNG architecture diagram.
 - Corrected protocol documentation to state that MQTT QoS 2, ZigMV `exact`, durable reconnect sessions, and full NATS JetStream parity are not yet implemented.
+- Added [`docs/ZIGMV_BETA_RELEASE_GATES.md`](docs/ZIGMV_BETA_RELEASE_GATES.md), which consolidates the 0.5.0-to-1.0.0-beta implementation, benchmark, failure-test, compatibility, and release gates.
+- Added recorded benchmark evidence to the README, including publish ACK, fan-out, stream-cost, realtime, and consumer-group results.
 
 ### Known limitations
 
-- Native TLS/mTLS, authenticated remote edge links, bounded offline transfer, reconnect backoff, and NATS/MQTT compatibility adapters remain pending for the complete 0.5.0 train.
+- Native TLS/mTLS, authenticated remote edge links, bounded offline transfer, reconnect backoff, and full NATS/MQTT semantic compatibility remain pending for the complete 0.5.0 train.
 - ACL and rate-limit enforcement currently protects the native ZigMV path; legacy compatibility listeners remain separate migration surfaces.
 
 ## [0.4.0] - 2026-08-17

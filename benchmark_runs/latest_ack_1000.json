@@ -1,0 +1,8 @@
+status=PASS
+protocol=zigmv profile=live payload_bytes=128 target_mps=0.00
+duration_seconds=0.084040 drain_seconds=0.084201
+offered_messages=1000 socket_accepted_messages=1000 broker_accepted_messages=1000 delivered_messages=1000
+lost_messages=0 delivery_ratio=1.000000 gaps=0 duplicates=0 invalid_frames=0
+accepted_msg_per_sec=11899.03 delivered_msg_per_sec=11876.33
+backpressure_events=0
+publisher_bye_sent=true

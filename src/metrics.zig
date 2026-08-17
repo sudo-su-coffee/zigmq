@@ -9,6 +9,8 @@ pub const Snapshot = struct {
     redelivered_total: u64,
     acknowledged_total: u64,
     expired_total: u64,
+    rejected_clients_total: u64,
+    payload_bytes_total: u64,
 };
 
 pub fn format(snapshot: Snapshot, version: []const u8, output: *[4096]u8) ![]const u8 {
@@ -39,8 +41,14 @@ pub fn format(snapshot: Snapshot, version: []const u8, output: *[4096]u8) ![]con
         "zigmv_acknowledged_total {d}\n" ++
         "# HELP zigmv_expired_total Expired durable deliveries.\n" ++
         "# TYPE zigmv_expired_total counter\n" ++
-        "zigmv_expired_total {d}\n",
-        .{ version, snapshot.clients, snapshot.subscriptions, snapshot.pending_durable, snapshot.published_total, snapshot.delivered_total, snapshot.redelivered_total, snapshot.acknowledged_total, snapshot.expired_total },
+        "zigmv_expired_total {d}\n" ++
+        "# HELP zigmv_rejected_clients_total Connections rejected at the configured client limit.\n" ++
+        "# TYPE zigmv_rejected_clients_total counter\n" ++
+        "zigmv_rejected_clients_total {d}\n" ++
+        "# HELP zigmv_payload_bytes_total Accepted ZigMV payload bytes.\n" ++
+        "# TYPE zigmv_payload_bytes_total counter\n" ++
+        "zigmv_payload_bytes_total {d}\n",
+        .{ version, snapshot.clients, snapshot.subscriptions, snapshot.pending_durable, snapshot.published_total, snapshot.delivered_total, snapshot.redelivered_total, snapshot.acknowledged_total, snapshot.expired_total, snapshot.rejected_clients_total, snapshot.payload_bytes_total },
     );
 }
 
@@ -55,8 +63,11 @@ test "formats stable prometheus metrics" {
         .redelivered_total = 7,
         .acknowledged_total = 8,
         .expired_total = 9,
+        .rejected_clients_total = 10,
+        .payload_bytes_total = 11,
     }, "0.6.0", &buffer);
     try std.testing.expect(std.mem.indexOf(u8, text, "# TYPE zigmv_published_total counter") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "zigmv_pending_durable 4") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "zigmv_build_info{version=\"0.6.0\"} 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "zigmv_rejected_clients_total 10") != null);
 }

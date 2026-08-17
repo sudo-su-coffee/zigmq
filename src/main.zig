@@ -1617,8 +1617,8 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
         zigmq.validateTopic(session_id) catch return zmpError(client, "invalid_session");
         if (client.session_id) |old_session| broker.allocator.free(old_session);
         client.session_id = broker.allocator.dupe(u8, session_id) catch return zmpError(client, "out_of_memory");
-        broker.bindSession(client);
         client.sendFmt("{s} OK SESSION {s}\r\n", .{ expected_magic, session_id }) catch return false;
+        broker.bindSession(client);
         return true;
     }
     if (std.mem.eql(u8, operation, "STATS")) {

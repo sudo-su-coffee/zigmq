@@ -210,13 +210,13 @@ ZMV/1 PUB work 42 jobs.created 5
 hello
 ```
 
-The current ZigMV foundation enables `live` and `work`. `durable`, `state`, and `exact` remain disabled until their persistence, expiry, recovery, and deduplication tests are complete.
+The `0.4.0` ZigMV train enables `live`, `work`, `durable`, and `state`. `exact` remains disabled until deduplication and crash-recovery guarantees are complete.
 
 ## ZigMV direction
 
 The next protocol generation is **ZigMV**: one lightweight message protocol and one Adaptive Delivery and Transfer algorithm for cloud services, IoT devices, and edge gateways. It combines NATS-like low-latency subjects, request/reply, and work sharing with MQTT-like device sessions, retained state, expiry, and stronger delivery profiles. It is a new protocol, not two protocol implementations joined by a bridge.
 
-The current `0.2.0-beta.1` line contains the ZMP/ADR foundation. The ZMV/1 foundation, `live`, and the first `work` path are now merged into `main`. Related milestones will be grouped into larger release trains: the next public target is `0.4.0`, combining the foundation, durable delivery, and retained state work; later trains will combine security/edge compatibility, operations/scaling, exact delivery/clustering, and final hardening before `1.0.0-beta`.
+The `0.4.0` release combines the ZMV/1 foundation, `live`, `work`, durable delivery, ACK handling, durable stream append, retained state, expiry metadata, and the first persistent delivery state. Later trains will add security/edge compatibility, operations/scaling, exact delivery/clustering, and final hardening before `1.0.0-beta`.
 
 The project boundaries remain intentional. `zigkv` owns Redis-compatible data structures; `nammapush-rs` owns notification delivery and provider fallback; zigmq/ZigMV owns transport, routing, delivery state, and edge messaging.
 
@@ -234,7 +234,8 @@ Read the design first: [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md).
 | [`docs/ZIGMV_ROADMAP.md`](docs/ZIGMV_ROADMAP.md) | Grouped release trains from 0.4.0 to 1.0.0-beta |
 | [`docs/ZMP_LIVE_TEST_PLAN.md`](docs/ZMP_LIVE_TEST_PLAN.md) | Live-profile acceptance gates and test matrix |
 | [`docs/ZMP_LIVE_BENCHMARK_2026-08-16.md`](docs/ZMP_LIVE_BENCHMARK_2026-08-16.md) | Recorded beta benchmark results and gate decision |
-| [`docs/RELEASE_0.2.0-beta.1.md`](docs/RELEASE_0.2.0-beta.1.md) | Beta release notes and known limitations |
+| [`docs/RELEASE_0.2.0-beta.1.md`](docs/RELEASE_0.2.0-beta.1.md) | Previous beta release notes and known limitations |
+| [`docs/RELEASE_0.4.0.md`](docs/RELEASE_0.4.0.md) | Grouped 0.4.0 ZigMV release notes and guarantees |
 | [`CHANGELOG.md`](CHANGELOG.md) | Version history |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution and test workflow |
 

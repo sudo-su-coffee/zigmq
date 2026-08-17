@@ -78,6 +78,19 @@ ZMV/1 ACK 104\r\n
 ZMV/1 OK ACK\r\n
 ```
 
+## Persistent sessions
+
+A client can claim a durable session after authentication:
+
+```text
+ZMV/1 SESSION edge-gateway-7\r\n
+ZMV/1 OK SESSION edge-gateway-7\r\n
+```
+
+When the broker is started with `--session-store`, durable deliveries associated with this session survive a client disconnect and broker restart. Reclaiming the same session ID rebinds pending deliveries and replays them with the original delivery IDs. A session ID must be a valid non-wildcard ZigMV subject token.
+
+The session store is opt-in in 0.7.0. Without it, durable delivery retains the connected-session behavior described in [Delivery profiles](/protocol/profiles).
+
 ## Operational counters
 
 Authenticated native clients can request process-local counters:

@@ -51,6 +51,9 @@ jobs:
       - name: Durable stream tests
         run: python3 scripts/stream_test.py --binary ./zig-out/bin/zigmq
 
+      - name: Persistent session recovery
+        run: python3 scripts/session_recovery_test.py --binary ./zig-out/bin/zigmq --port 4231
+
       - name: CLI tests
         run: python3 scripts/cli_test.py --binary ./zig-out/bin/zigmq
 

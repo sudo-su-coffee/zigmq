@@ -1,0 +1,12 @@
+---
+title: ZigMV 0.8.0 train
+description: Bounded edge forwarding and reconnect foundations.
+---
+
+# ZigMV 0.8.0 train
+
+The 0.8.0 foundation introduces a reusable edge forwarder with explicit export filters, monotonic sequence numbers, bounded queue items and bytes, and capped exponential reconnect backoff.
+
+The forwarder rejects subjects outside the configured export filter and returns a bounded `QueueFull` result instead of growing without limit. Applications can measure queue occupancy, sequence progress, and retry delay while deciding whether a `live` event may be dropped or a `durable` command must remain pending.
+
+Native authenticated edge links, TLS/mTLS, link identity, import filters, cursor transfer, lag metrics, and a complete broker-to-broker forwarding protocol remain release gates. The current foundation must therefore be described as edge-forwarding infrastructure, not as a finished remote-cluster feature.

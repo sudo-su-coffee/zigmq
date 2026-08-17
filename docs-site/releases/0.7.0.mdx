@@ -1,0 +1,23 @@
+---
+title: ZigMV 0.7.0 train
+description: Persistent durable sessions and crash-safe recovery.
+---
+
+# ZigMV 0.7.0 train
+
+The 0.7.0 implementation adds an opt-in persistent durable-session path while preserving the connected-session behavior for deployments that do not configure a session store.
+
+```sh
+./zig-out/bin/zigmq --protocol zigmv --session-store ./data/sessions.zms
+```
+
+After authentication, a client claims a stable session ID:
+
+```text
+ZMV/1 SESSION edge-gateway-7\r\n
+ZMV/1 OK SESSION edge-gateway-7\r\n
+```
+
+Durable publications associated with that session are written to a checksummed append-only journal before delivery. ACK records remove the delivery from recovered pending state. On restart, the journal replays publication and ACK records, truncates an incomplete tail, rebuilds pending deliveries, and rebinds them when the same session ID reconnects.
+
+The release train is covered by a broker-restart integration test that verifies the original delivery ID and payload are replayed and can then be acknowledged. The implementation does not claim distributed replication, cross-node failover, or exactly-once side effects.

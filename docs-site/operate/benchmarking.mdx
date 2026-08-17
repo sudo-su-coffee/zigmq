@@ -44,6 +44,19 @@ python3 scripts/benchmark_zigmv.py \
 
 The live command may return `PASS_LOSSY_LIVE` when delivery loss occurs without gaps, duplicates, or invalid frames. An ACK run returns `PASS` only when every broker-accepted message is delivered by the benchmark consumer.
 
+## Reproducible matrix runner
+
+For a bounded local matrix across payload sizes and publisher-ACK modes, run:
+
+```sh
+python3 scripts/benchmark_matrix.py \
+  --binary ./zig-out/bin/zigmq \
+  --messages 1000 \
+  --output benchmark_runs/zigmv_matrix.json
+```
+
+The runner records each case’s payload size, message count, ACK mode, return code, raw benchmark output, and broker log. Its default matrix is intentionally a smoke matrix; the full beta gate must expand publishers, subscribers, profiles, duration, failure injection, and resource measurements as described in `docs/ZIGMV_BETA_RELEASE_GATES.md`.
+
 ## Metrics
 
 | Metric | Meaning |

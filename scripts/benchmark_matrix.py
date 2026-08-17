@@ -67,13 +67,14 @@ def main() -> int:
     parser.add_argument("--messages", type=int, default=1000)
     parser.add_argument("--output", default="benchmark_runs/zigmv_matrix.json")
     parser.add_argument("--port", type=int, default=4250)
+    parser.add_argument("--ack-only", action="store_true", help="run only acknowledged lossless cases")
     args = parser.parse_args()
     if args.messages <= 0:
         parser.error("--messages must be positive")
     results = []
     case_port = args.port
     for payload_size in PAYLOADS:
-        for ack in (False, True):
+        for ack in ((True,) if args.ack_only else (False, True)):
             result = run_case(args.binary, case_port, args.messages, payload_size, ack)
             result["port"] = case_port
             results.append(result)
@@ -83,7 +84,8 @@ def main() -> int:
         json.dump({"protocol": "zigmv", "results": results}, output, indent=2)
         output.write("\n")
     failures = [result for result in results if result["returncode"] != 0]
-    print(f"cases={len(results)} failures={len(failures)} output={args.output}")
+    policy = "lossless_acknowledged" if args.ack_only else "mixed_lossless_and_at_most_once_stress"
+    print(f"cases={len(results)} failures={len(failures)} policy={policy} output={args.output}")
     return 1 if failures else 0
 
 

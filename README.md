@@ -30,7 +30,7 @@ ZigMV uses one protocol and one message model for backend services, sensors, gat
 
 ## Documentation
 
-The separate self-hostable [Mintlify documentation site](docs-site/) contains the protocol guide, wire format, delivery guarantees, benchmarking method, security guidance, edge architecture, MQTT/NATS adapter notes, and the roadmap to `1.0.0-beta`.
+The separate self-hostable [Mintlify documentation site](docs-site/) contains the protocol guide, wire format, delivery guarantees, benchmarking method, security guidance, edge architecture, MQTT/NATS adapter notes, and the roadmap to `1.0.0-beta`. The beta upgrade, rollback, and failure-semantics procedures are documented in [`docs/ZIGMV_BETA_OPERATIONS.md`](docs/ZIGMV_BETA_OPERATIONS.md).
 
 ## Why zigmq?
 

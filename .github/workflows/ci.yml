@@ -54,6 +54,9 @@ jobs:
           sleep 1
           python3 scripts/benchmark_zigmv.py --port 4222 --messages 16 --payload-size 128 --drain-timeout 10 --ack-publishes
 
+      - name: Lossless acknowledged benchmark matrix
+        run: python3 scripts/benchmark_matrix.py --binary ./zig-out/bin/zigmq --messages 256 --ack-only --output /tmp/zigmv-ack-matrix.json --port 4225
+
       - name: End-to-end tests
         run: python3 scripts/e2e_test.py --binary ./zig-out/bin/zigmq
 
@@ -95,6 +98,15 @@ jobs:
 
       - name: Hostile input resilience
         run: python3 scripts/protocol_hostile_input_test.py --binary ./zig-out/bin/zigmq --port 4243
+
+      - name: Deterministic protocol fuzz survival
+        run: python3 scripts/protocol_fuzz_test.py --binary ./zig-out/bin/zigmq --port 4244 --cases 250
+
+      - name: Failure injection and journal recovery
+        run: python3 scripts/failure_injection_test.py --binary ./zig-out/bin/zigmq --port 4245
+
+      - name: Documentation link validation
+        run: python3 scripts/check_docs_links.py
 
       - name: Release gate consistency
         run: python3 scripts/release_gate_check.py --root . --expected-version 1.0.0-beta.1

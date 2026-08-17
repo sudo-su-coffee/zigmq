@@ -71,6 +71,13 @@
 - [x] Add real TLS/mTLS listener configuration, certificate verification, and security regression tests.
 - [ ] Do not bump to 1.0.0 or publish artifacts until edge transport and TLS/mTLS gates pass.
 
+## Full roadmap and beta audit
+
+- [ ] Audit all planned versions through 0.15.0 and the 1.0.0-beta gates against the current repository.
+- [ ] Produce an exact missing-version and missing-deliverable report.
+- [ ] Implement remaining code, CI/CD, benchmark, soak, fuzz, compatibility, failure, and artifact gates.
+- [ ] Re-run the full suite and update the final tag-readiness decision.
+
 ## Accelerated v1.0.0-beta execution
 
 - [x] Replace direct net.Stream reader/writer coupling with a shared plain/TLS transport abstraction.

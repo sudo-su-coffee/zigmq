@@ -22,6 +22,13 @@ def line(reader) -> bytes:
     return value
 
 
+def exact(reader, count: int) -> bytes:
+    value = reader.read(count)
+    if len(value) != count:
+        raise RuntimeError(f"short payload: expected {count}, got {len(value)}")
+    return value
+
+
 def main(binary: str, port: int) -> None:
     process = subprocess.Popen(
         [binary, "--protocol", "zigmv", "--host", "127.0.0.1", "--port", str(port)],
@@ -88,6 +95,8 @@ def main(binary: str, port: int) -> None:
         if not durable_message.startswith(b"ZMV/1 MSG durable "):
             raise RuntimeError(f"durable delivery failed: {durable_message!r}")
         durable_id = durable_message.split()[3]
+        if exact(durable_reader, 7) != b"hello\r\n":
+            raise RuntimeError("durable payload framing failed")
         durable.sendall(b"ZMV/1 ACK " + durable_id + b"\r\n")
         if not line(durable_reader).startswith(b"ZMV/1 OK ACK"):
             raise RuntimeError("durable acknowledgement failed")

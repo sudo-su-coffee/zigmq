@@ -4,6 +4,7 @@ const posix = std.posix;
 const zigmq = @import("zigmq");
 const cli = @import("cli.zig");
 const zmp = @import("zmp.zig");
+const persist = @import("zigmv_persist.zig");
 
 const Allocator = std.mem.Allocator;
 const Protocol = enum { custom, nats, mqtt, zmp, zigmv };
@@ -25,7 +26,8 @@ const BrokerStats = struct {
     expired: u64 = 0,
 };
 const DurableDelivery = struct {
-    client: *Client,
+    client: ?*Client,
+    session_id: []u8,
     topic: []u8,
     payload: []u8,
     expires_at_ms: u64,
@@ -108,6 +110,7 @@ const Client = struct {
     publish_window_ms: u64 = 0,
     publish_count: u32 = 0,
     seen_publish_ids: std.AutoHashMap(u64, void),
+    session_id: ?[]u8 = null,
 
     fn init(stream: net.Stream, allocator: Allocator, authenticated: bool) Client {
         return .{
@@ -286,6 +289,7 @@ const Client = struct {
         self.queue.deinit(self.allocator);
         self.subscriptions.deinit();
         self.seen_publish_ids.deinit();
+        if (self.session_id) |session_id| self.allocator.free(session_id);
         for (self.nats_subscriptions.items) |subscription| {
             self.allocator.free(subscription.subject);
             self.allocator.free(subscription.sid);
@@ -325,13 +329,14 @@ const Broker = struct {
     retained: std.StringHashMap(RetainedMessage),
     zigmv_subscriptions: std.ArrayList(ZigmvSubscription) = .empty,
     stream_file: ?std.fs.File = null,
+    session_journal: ?persist.Journal = null,
     stream_sequence: u64 = 0,
     next_delivery_id: u64 = 1,
     durable_pending: std.AutoHashMap(u64, DurableDelivery),
     stats: BrokerStats = .{},
     delivery_generation: usize = 0,
 
-    fn init(allocator: Allocator, protocol: Protocol, host: []const u8, port: u16, auth_token: ?[]const u8, publish_allow: ?[]const u8, subscribe_allow: ?[]const u8, publish_rate_limit: u32, stream_file: ?std.fs.File) Broker {
+    fn init(allocator: Allocator, protocol: Protocol, host: []const u8, port: u16, auth_token: ?[]const u8, publish_allow: ?[]const u8, subscribe_allow: ?[]const u8, publish_rate_limit: u32, stream_file: ?std.fs.File, session_journal: ?persist.Journal) Broker {
         return .{
             .allocator = allocator,
             .protocol = protocol,
@@ -347,7 +352,56 @@ const Broker = struct {
             .retained = std.StringHashMap(RetainedMessage).init(allocator),
             .durable_pending = std.AutoHashMap(u64, DurableDelivery).init(allocator),
             .stream_file = stream_file,
+            .session_journal = session_journal,
         };
+    }
+
+    fn recoverSessionJournal(self: *Broker) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const journal = &(self.session_journal orelse return);
+        var iterator = journal.pending().iterator();
+        const now_ms = @as(u64, @intCast(std.time.milliTimestamp()));
+        while (iterator.next()) |entry| {
+            const record = entry.value_ptr;
+            const session_id = try self.allocator.dupe(u8, record.session_id);
+            errdefer self.allocator.free(session_id);
+            const topic = try self.allocator.dupe(u8, record.subject);
+            errdefer self.allocator.free(topic);
+            const payload = try self.allocator.dupe(u8, record.payload);
+            errdefer self.allocator.free(payload);
+            try self.durable_pending.put(record.message_id, .{
+                .client = null,
+                .session_id = session_id,
+                .topic = topic,
+                .payload = payload,
+                .expires_at_ms = record.expires_at_ms,
+                .retry_at_ms = now_ms,
+            });
+            if (record.message_id >= self.next_delivery_id) self.next_delivery_id = record.message_id + 1;
+        }
+        if (self.next_delivery_id == 0) self.next_delivery_id = 1;
+    }
+
+    fn bindSession(self: *Broker, client: *Client) void {
+        const session_id = client.session_id orelse return;
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        var replay_ids: std.ArrayList(u64) = .empty;
+        defer replay_ids.deinit(self.allocator);
+        var iterator = self.durable_pending.iterator();
+        while (iterator.next()) |entry| {
+            if (std.mem.eql(u8, entry.value_ptr.session_id, session_id)) {
+                entry.value_ptr.client = client;
+                replay_ids.append(self.allocator, entry.key_ptr.*) catch return;
+            }
+        }
+        for (replay_ids.items) |message_id| {
+            const pending = self.durable_pending.getPtr(message_id) orelse continue;
+            client.sendZmpMessage("durable", message_id, pending.topic, pending.payload) catch |err| {
+                std.log.debug("session replay failed: {s}", .{@errorName(err)});
+            };
+        }
     }
 
     fn publishSubjectAllowed(self: *Broker, subject: []const u8) bool {
@@ -442,10 +496,16 @@ const Broker = struct {
         var remove_ids: std.ArrayList(u64) = .empty;
         defer remove_ids.deinit(self.allocator);
         while (iterator.next()) |entry| {
-            if (entry.value_ptr.client == client) remove_ids.append(self.allocator, entry.key_ptr.*) catch break;
+            if (entry.value_ptr.client != client) continue;
+            if (client.session_id != null) {
+                entry.value_ptr.client = null;
+            } else {
+                remove_ids.append(self.allocator, entry.key_ptr.*) catch break;
+            }
         }
         for (remove_ids.items) |message_id| {
             if (self.durable_pending.fetchRemove(message_id)) |removed| {
+                self.allocator.free(removed.value.session_id);
                 self.allocator.free(removed.value.topic);
                 self.allocator.free(removed.value.payload);
             }
@@ -478,10 +538,12 @@ const Broker = struct {
             const shift: u6 = @intCast(@min(pending.attempts, 5));
             const delay_ms = @min(@as(u64, 30_000), @as(u64, 1_000) << shift);
             pending.retry_at_ms = now_ms + delay_ms;
-            self.stats.redelivered += 1;
-            pending.client.sendZmpMessage("durable", message_id, pending.topic, pending.payload) catch |err| {
-                std.log.debug("durable retry failed: {s}", .{@errorName(err)});
-            };
+            if (pending.client) |client| {
+                self.stats.redelivered += 1;
+                client.sendZmpMessage("durable", message_id, pending.topic, pending.payload) catch |err| {
+                    std.log.debug("durable retry failed: {s}", .{@errorName(err)});
+                };
+            }
         }
     }
 
@@ -522,10 +584,12 @@ const Broker = struct {
         self.retained.deinit();
         var pending_iterator = self.durable_pending.iterator();
         while (pending_iterator.next()) |entry| {
+            self.allocator.free(entry.value_ptr.session_id);
             self.allocator.free(entry.value_ptr.topic);
             self.allocator.free(entry.value_ptr.payload);
         }
         self.durable_pending.deinit();
+        if (self.session_journal) |*journal| journal.deinit();
         for (self.zigmv_subscriptions.items) |subscription| {
             self.allocator.free(subscription.profile);
             self.allocator.free(subscription.subject);
@@ -717,7 +781,13 @@ const Broker = struct {
                 const payload_copy = try self.allocator.dupe(u8, payload);
                 errdefer self.allocator.free(payload_copy);
                 const now_ms = @as(u64, @intCast(std.time.milliTimestamp()));
-                try self.durable_pending.put(message_id, .{ .client = subscription.client, .topic = topic_copy, .payload = payload_copy, .expires_at_ms = now_ms + ttl_ms, .retry_at_ms = now_ms + 1000 });
+                const session_id = subscription.client.session_id orelse "";
+                if (self.session_journal) |*journal| {
+                    if (session_id.len != 0) try journal.appendPublish(session_id, message_id, topic, payload, now_ms + ttl_ms);
+                }
+                const session_copy = try self.allocator.dupe(u8, session_id);
+                errdefer self.allocator.free(session_copy);
+                try self.durable_pending.put(message_id, .{ .client = subscription.client, .session_id = session_copy, .topic = topic_copy, .payload = payload_copy, .expires_at_ms = now_ms + ttl_ms, .retry_at_ms = now_ms + 1000 });
                 self.stats.delivered += 1;
                 subscription.client.sendZmpMessage("durable", message_id, topic, payload) catch |err| std.log.debug("durable delivery failed: {s}", .{@errorName(err)});
             } else {
@@ -736,8 +806,12 @@ const Broker = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         const pending = self.durable_pending.get(message_id) orelse return false;
-        if (pending.client != client) return false;
+        if (pending.client != client and !(pending.client == null and client.session_id != null and std.mem.eql(u8, pending.session_id, client.session_id.?))) return false;
+        if (self.session_journal) |*journal| {
+            journal.appendAck(message_id) catch return false;
+        }
         const removed = self.durable_pending.fetchRemove(message_id).?;
+        self.allocator.free(removed.value.session_id);
         self.allocator.free(removed.value.topic);
         self.allocator.free(removed.value.payload);
         self.stats.acknowledged += 1;
@@ -1536,6 +1610,17 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
         client.sendFmt("{s} BYE\r\n", .{expected_magic}) catch {};
         return false;
     }
+    if (std.mem.eql(u8, operation, "SESSION")) {
+        if (!client.zigmv_client) return zmpError(client, "session_not_supported");
+        const session_id = tokens.next() orelse return zmpError(client, "missing_session");
+        if (tokens.next() != null) return zmpError(client, "invalid_command");
+        zigmq.validateTopic(session_id) catch return zmpError(client, "invalid_session");
+        if (client.session_id) |old_session| broker.allocator.free(old_session);
+        client.session_id = broker.allocator.dupe(u8, session_id) catch return zmpError(client, "out_of_memory");
+        broker.bindSession(client);
+        client.sendFmt("{s} OK SESSION {s}\r\n", .{ expected_magic, session_id }) catch return false;
+        return true;
+    }
     if (std.mem.eql(u8, operation, "STATS")) {
         if (!client.zigmv_client or tokens.next() != null) return zmpError(client, "invalid_command");
         broker.mutex.lock();
@@ -1716,6 +1801,7 @@ pub fn main() !void {
         allocator.free(token);
     };
     var stream_path: ?[]const u8 = null;
+    var session_store_path: ?[]const u8 = null;
     var index: usize = if (args.len >= 2 and std.mem.eql(u8, args[1], "server")) 2 else 1;
     while (index < args.len) : (index += 1) {
         if (std.mem.eql(u8, args[index], "--host")) {
@@ -1755,11 +1841,15 @@ pub fn main() !void {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingStreamPath;
             stream_path = args[index];
+        } else if (std.mem.eql(u8, args[index], "--session-store")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingSessionStorePath;
+            session_store_path = args[index];
         } else if (std.mem.eql(u8, args[index], "--version")) {
             std.debug.print("zigmq {s}\n", .{zigmq.version});
             return;
         } else if (std.mem.eql(u8, args[index], "--help")) {
-            std.debug.print("zigmq {s}\nUsage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats|mqtt|zmp|zigmv] [--auth-token token|--auth-token-file path] [--publish-allow subject[,subject...]] [--subscribe-allow subject[,subject...]] [--publish-rate-limit messages_per_second] [--stream path]\n", .{zigmq.version});
+            std.debug.print("zigmq {s}\nUsage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats|mqtt|zmp|zigmv] [--auth-token token|--auth-token-file path] [--publish-allow subject[,subject...]] [--subscribe-allow subject[,subject...]] [--publish-rate-limit messages_per_second] [--stream path] [--session-store path]\n", .{zigmq.version});
             return;
         } else {
             std.debug.print("Unknown argument: {s}\n", .{args[index]});
@@ -1791,9 +1881,17 @@ pub fn main() !void {
         try file.chmod(0o600);
         stream_file = file;
     }
-    var broker = Broker.init(allocator, protocol, host, port, auth_token, publish_allow, subscribe_allow, publish_rate_limit, stream_file);
+    var session_journal: ?persist.Journal = null;
+    if (session_store_path) |path| {
+        var file = try std.fs.cwd().createFile(path, .{ .read = true, .truncate = false, .lock = .exclusive, .mode = 0o600 });
+        errdefer file.close();
+        try file.chmod(0o600);
+        session_journal = try persist.Journal.open(allocator, file);
+    }
+    var broker = Broker.init(allocator, protocol, host, port, auth_token, publish_allow, subscribe_allow, publish_rate_limit, stream_file, session_journal);
     defer broker.deinit();
     try broker.recoverStreamSequence();
+    try broker.recoverSessionJournal();
     var threads: std.ArrayList(std.Thread) = .empty;
     defer threads.deinit(allocator);
 

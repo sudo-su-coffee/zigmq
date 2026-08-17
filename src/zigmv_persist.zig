@@ -42,6 +42,10 @@ pub const Journal = struct {
         self.file.close();
     }
 
+    pub fn pending(self: *Journal) *std.AutoHashMap(u64, Delivery) {
+        return &self.deliveries;
+    }
+
     pub fn appendPublish(self: *Journal, session_id: []const u8, message_id: u64, subject: []const u8, payload: []const u8, expires_at_ms: u64) !void {
         if (session_id.len > std.math.maxInt(u16) or subject.len > std.math.maxInt(u16) or payload.len > std.math.maxInt(u32)) return error.RecordTooLarge;
         var header: [header_len]u8 = undefined;

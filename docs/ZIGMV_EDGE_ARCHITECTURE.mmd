@@ -1,0 +1,37 @@
+flowchart LR
+    D[IoT devices and edge services<br/>telemetry, commands, state] -->|ZMV/1 over TCP<br/>AUTH + ACL| E[Local ZigMV edge broker]
+
+    E --> L[live<br/>volatile, low latency]
+    E --> W[work<br/>one worker per group]
+    E --> U[durable<br/>ACK + bounded retry<br/>connected session]
+    E --> S[state<br/>retained last value + expiry]
+
+    U --> Q[Bounded local stream / pending delivery state]
+    S --> R[Retained state index]
+
+    E -->|subject export filter| X[Authenticated edge link<br/>TLS/mTLS pending release gate]
+    X -->|reconnect + cursor transfer<br/>bounded queue| C[Regional or cloud ZigMV broker]
+
+    C --> A[Cloud services and consumers]
+    C --> N[NATS compatibility adapter<br/>Core / request-reply boundary]
+    C --> M[MQTT 5.0 compatibility adapter<br/>QoS/session boundary]
+
+    Q -.->|offline configured profiles<br/>future transfer| X
+    X -.->|link lag, retries, drops, reconnect metrics| O[Operations and observability]
+    E -.-> O
+    C -.-> O
+
+    classDef edge fill:#0b5,stroke:#083,color:#fff;
+    classDef cloud fill:#246,stroke:#123,color:#fff;
+    classDef profile fill:#f4f1de,stroke:#765,color:#111;
+    classDef ops fill:#ddd,stroke:#666,color:#111;
+    class E,X edge;
+    class C,A,N,M cloud;
+    class L,W,U,S,Q,R profile;
+    class O ops;
+    linkStyle 7,8 stroke-dasharray: 5 5;
+
+%% Guarantees:
+%% live ~= Core NATS / MQTT QoS 0
+%% durable currently ~= connected-session ACK/retry, not MQTT QoS 2
+%% exact and full MQTT QoS 2 remain future release gates

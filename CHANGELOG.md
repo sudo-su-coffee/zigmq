@@ -13,6 +13,8 @@ All notable changes to zigmq are documented here.
 - Integration coverage for authentication, ACL denial, allowed subjects, and rate limiting.
 - Native `scripts/benchmark_zigmv.py` target-rate stress harness with offered, accepted, delivered, loss, gap, duplicate, invalid-frame, and backpressure metrics.
 - Bounded producer backpressure in client mailboxes so a full queue blocks the publishing path rather than silently allowing unbounded growth or immediately dropping the delivery.
+- Bounded in-session durable redelivery with exponential retry backoff; unacknowledged deliveries are retried while the original client remains connected and are removed safely on disconnect.
+- Native durable redelivery integration coverage in `scripts/zigmv_test.py`.
 
 ### Performance notes
 
@@ -21,7 +23,9 @@ All notable changes to zigmq are documented here.
 
 ### Documentation
 
-- README usage now reflects ZigMV naming, implemented delivery profiles, the 0.4.0 baseline, and the 0.5.0 security configuration.
+- README usage now reflects ZigMV naming, implemented delivery profiles, the 0.4.0 baseline, the 0.5.0 security configuration, practical use cases, and the edge architecture flow.
+- Added `docs/ZIGMV_EDGE_ARCHITECTURE.mmd` and its rendered PNG architecture diagram.
+- Corrected protocol documentation to state that MQTT QoS 2, ZigMV `exact`, durable reconnect sessions, and full NATS JetStream parity are not yet implemented.
 
 ### Known limitations
 
@@ -46,7 +50,7 @@ All notable changes to zigmq are documented here.
 
 ### Known limitations
 
-- Automatic retry/redelivery after disconnect or process restart is not yet complete.
+- Automatic retry/redelivery after disconnect or process restart is not yet complete; the current retry loop is limited to the connected client session.
 - Persistent offline sessions, replicated streams, native TLS, clustering, and exactly-once delivery remain future release-train work.
 - `exact` remains disabled until deduplication and crash-recovery guarantees are proven.
 

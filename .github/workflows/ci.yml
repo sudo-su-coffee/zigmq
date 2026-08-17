@@ -26,6 +26,9 @@ jobs:
       - name: Build
         run: zig build
 
+      - name: ZigMV smoke test
+        run: python3 scripts/zigmv_test.py --binary ./zig-out/bin/zigmq --port 4230
+
       - name: ZMP live benchmark (diagnostic)
         continue-on-error: true
         shell: bash

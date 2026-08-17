@@ -22,6 +22,13 @@ def line(reader) -> bytes:
     return value
 
 
+def exact(reader, count: int) -> bytes:
+    value = reader.read(count)
+    if len(value) != count:
+        raise RuntimeError(f"short payload: expected {count}, got {len(value)}")
+    return value
+
+
 def main(binary: str, port: int) -> None:
     process = subprocess.Popen(
         [binary, "--protocol", "zigmv", "--host", "127.0.0.1", "--port", str(port)],
@@ -69,9 +76,37 @@ def main(binary: str, port: int) -> None:
         if not line(live_reader).startswith(b"ZMV/1 MSG live"):
             raise RuntimeError("live no-ack delivery failed")
 
+        durable, durable_reader = connect("127.0.0.1", port)
+        state, state_reader = connect("127.0.0.1", port)
+        sockets.extend([(durable, durable_reader), (state, state_reader)])
+        durable.sendall(b"ZMV/1 SUB durable jobs\r\n")
+        state.sendall(b"ZMV/1 SUB state device.status\r\n")
+        if not line(durable_reader).startswith(b"ZMV/1 OK SUB"):
+            raise RuntimeError("durable subscription failed")
+        if not line(state_reader).startswith(b"ZMV/1 OK SUB"):
+            raise RuntimeError("state subscription failed")
+
         publisher.sendall(b"ZMV/1 PUB durable 2 jobs 5\r\nhello\r\n")
-        if not line(publisher_reader).startswith(b"ZMV/1 ERR mode_not_implemented"):
-            raise RuntimeError("durable profile was not rejected explicitly")
+        if line(publisher_reader) != b"ZMV/1 OK PUB 2\r\n":
+            raise RuntimeError("durable publish acknowledgement failed")
+        durable_reader_socket = durable
+        durable_reader_socket.settimeout(2)
+        durable_message = line(durable_reader)
+        if not durable_message.startswith(b"ZMV/1 MSG durable "):
+            raise RuntimeError(f"durable delivery failed: {durable_message!r}")
+        durable_id = durable_message.split()[3]
+        if exact(durable_reader, 7) != b"hello\r\n":
+            raise RuntimeError("durable payload framing failed")
+        durable.sendall(b"ZMV/1 ACK " + durable_id + b"\r\n")
+        if not line(durable_reader).startswith(b"ZMV/1 OK ACK"):
+            raise RuntimeError("durable acknowledgement failed")
+
+        publisher.sendall(b"ZMV/1 PUB state 3 device.status 4\r\nokay\r\n")
+        if line(publisher_reader) != b"ZMV/1 OK PUB 3\r\n":
+            raise RuntimeError("state publish acknowledgement failed")
+        state.settimeout(2)
+        if not line(state_reader).startswith(b"ZMV/1 MSG state"):
+            raise RuntimeError("state delivery failed")
         print("zigmv smoke test passed")
     finally:
         for sock, reader in sockets:

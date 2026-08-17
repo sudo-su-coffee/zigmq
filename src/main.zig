@@ -17,6 +17,20 @@ const GroupBucket = struct {
     clients: std.ArrayList(*Client) = .empty,
     next: usize = 0,
 };
+const DurableDelivery = struct {
+    client: *Client,
+    topic: []u8,
+    payload: []u8,
+    expires_at_ms: u64,
+    retry_at_ms: u64,
+    attempts: u32 = 0,
+};
+const ZigmvSubscription = struct {
+    client: *Client,
+    profile: []u8,
+    subject: []u8,
+    group: ?[]u8 = null,
+};
 
 fn mqttEncodeRemainingLength(value: usize, output: *[4]u8) usize {
     var remaining = value;
@@ -164,10 +178,10 @@ const Client = struct {
         return self.send(&message);
     }
 
-    fn sendZmpMessage(self: *Client, profile: []const u8, subject: []const u8, payload: []const u8) !void {
+    fn sendZmpMessage(self: *Client, profile: []const u8, message_id: u64, subject: []const u8, payload: []const u8) !void {
         var header: [512]u8 = undefined;
         const magic = if (self.zigmv_client) "ZMV/1" else "ZMP/1";
-        const header_bytes = try std.fmt.bufPrint(&header, "{s} MSG {s} 0 {s} {d}\r\n", .{ magic, profile, subject, payload.len });
+        const header_bytes = try std.fmt.bufPrint(&header, "{s} MSG {s} {d} {s} {d}\r\n", .{ magic, profile, message_id, subject, payload.len });
         const message = try self.allocator.alloc(u8, header_bytes.len + payload.len + 2);
         errdefer self.allocator.free(message);
         @memcpy(message[0..header_bytes.len], header_bytes);
@@ -260,8 +274,11 @@ const Broker = struct {
     nats_wildcard_subscriptions: std.ArrayList(NatsSubscriptionRef) = .empty,
     mqtt_subscriptions: std.ArrayList(MqttSubscription) = .empty,
     retained: std.StringHashMap(RetainedMessage),
+    zigmv_subscriptions: std.ArrayList(ZigmvSubscription) = .empty,
     stream_file: ?std.fs.File = null,
     stream_sequence: u64 = 0,
+    next_delivery_id: u64 = 1,
+    durable_pending: std.AutoHashMap(u64, DurableDelivery),
     delivery_generation: usize = 0,
 
     fn init(allocator: Allocator, protocol: Protocol, host: []const u8, port: u16, auth_token: ?[]const u8, stream_file: ?std.fs.File) Broker {
@@ -275,6 +292,7 @@ const Broker = struct {
             .group_subscribers = std.StringHashMap(GroupBucket).init(allocator),
             .nats_subscribers = std.StringHashMap(std.ArrayList(NatsSubscriptionRef)).init(allocator),
             .retained = std.StringHashMap(RetainedMessage).init(allocator),
+            .durable_pending = std.AutoHashMap(u64, DurableDelivery).init(allocator),
             .stream_file = stream_file,
         };
     }
@@ -343,6 +361,18 @@ const Broker = struct {
             self.allocator.free(filter);
         }
         client.mqtt_subscriptions.clearRetainingCapacity();
+        var zigmv_index: usize = 0;
+        while (zigmv_index < self.zigmv_subscriptions.items.len) {
+            const subscription = self.zigmv_subscriptions.items[zigmv_index];
+            if (subscription.client == client) {
+                _ = self.zigmv_subscriptions.swapRemove(zigmv_index);
+                self.allocator.free(subscription.profile);
+                self.allocator.free(subscription.subject);
+                if (subscription.group) |group| self.allocator.free(group);
+            } else {
+                zigmv_index += 1;
+            }
+        }
     }
 
     fn closeAll(self: *Broker) void {
@@ -380,6 +410,18 @@ const Broker = struct {
             self.allocator.free(entry.value_ptr.payload);
         }
         self.retained.deinit();
+        var pending_iterator = self.durable_pending.iterator();
+        while (pending_iterator.next()) |entry| {
+            self.allocator.free(entry.value_ptr.topic);
+            self.allocator.free(entry.value_ptr.payload);
+        }
+        self.durable_pending.deinit();
+        for (self.zigmv_subscriptions.items) |subscription| {
+            self.allocator.free(subscription.profile);
+            self.allocator.free(subscription.subject);
+            if (subscription.group) |group| self.allocator.free(group);
+        }
+        self.zigmv_subscriptions.deinit(self.allocator);
         if (self.stream_file) |file| file.close();
         self.clients.deinit(self.allocator);
     }
@@ -479,7 +521,7 @@ const Broker = struct {
         if (client.last_delivery_generation == self.delivery_generation) return;
         client.last_delivery_generation = self.delivery_generation;
         if (client.zmp_client or client.zigmv_client)
-            client.sendZmpMessage(profile, topic, payload) catch |err| std.log.debug("zmp delivery failed: {s}", .{@errorName(err)})
+            client.sendZmpMessage(profile, 0, topic, payload) catch |err| std.log.debug("zmp delivery failed: {s}", .{@errorName(err)})
         else
             client.sendCustomMessage(topic, reply, payload) catch |err| std.log.debug("custom delivery failed: {s}", .{@errorName(err)});
     }
@@ -494,6 +536,97 @@ const Broker = struct {
             bucket.next = (bucket.next + 1) % bucket.clients.items.len;
             self.deliverCustom(client, profile, topic, reply, payload);
         }
+    }
+
+    fn subscribeZigmv(self: *Broker, client: *Client, profile: []const u8, subject: []const u8, group: ?[]const u8) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (self.zigmv_subscriptions.items.len >= zigmq.max_subscriptions_per_client * zigmq.max_clients) return error.TooManySubscriptions;
+        for (self.zigmv_subscriptions.items) |subscription| {
+            if (subscription.client == client and std.mem.eql(u8, subscription.profile, profile) and std.mem.eql(u8, subscription.subject, subject)) return error.DuplicateSubscription;
+        }
+        const profile_copy = try self.allocator.dupe(u8, profile);
+        errdefer self.allocator.free(profile_copy);
+        const subject_copy = try self.allocator.dupe(u8, subject);
+        errdefer self.allocator.free(subject_copy);
+        const group_copy = if (group) |value| try self.allocator.dupe(u8, value) else null;
+        errdefer if (group_copy) |value| self.allocator.free(value);
+        try self.zigmv_subscriptions.append(self.allocator, .{ .client = client, .profile = profile_copy, .subject = subject_copy, .group = group_copy });
+    }
+
+    fn unsubscribeZigmv(self: *Broker, client: *Client, profile: []const u8, subject: []const u8) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        for (self.zigmv_subscriptions.items, 0..) |subscription, index| {
+            if (subscription.client == client and std.mem.eql(u8, subscription.profile, profile) and std.mem.eql(u8, subscription.subject, subject)) {
+                const removed = self.zigmv_subscriptions.swapRemove(index);
+                self.allocator.free(removed.profile);
+                self.allocator.free(removed.subject);
+                if (removed.group) |group| self.allocator.free(group);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn deliverZigmvState(self: *Broker, client: *Client, subject: []const u8) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        var iterator = self.retained.iterator();
+        while (iterator.next()) |entry| {
+            if (zigmq.subjectMatches(subject, entry.key_ptr.*)) {
+                client.sendZmpMessage("state", 0, entry.key_ptr.*, entry.value_ptr.payload) catch |err| std.log.debug("state delivery failed: {s}", .{@errorName(err)});
+            }
+        }
+    }
+
+    fn publishZigmv(self: *Broker, profile: []const u8, topic: []const u8, payload: []const u8, ttl_ms: u64) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.delivery_generation +%= 1;
+        if (self.delivery_generation == 0) self.delivery_generation = 1;
+        if (std.mem.eql(u8, profile, "durable")) {
+            try self.appendStreamLocked(topic, payload);
+        }
+        var work_clients = std.StringHashMap(*Client).init(self.allocator);
+        defer work_clients.deinit();
+        for (self.zigmv_subscriptions.items) |subscription| {
+            if (!std.mem.eql(u8, subscription.profile, profile) or !zigmq.subjectMatches(subscription.subject, topic)) continue;
+            if (std.mem.eql(u8, profile, "work")) {
+                const group = subscription.group orelse continue;
+                if (!work_clients.contains(group)) try work_clients.put(group, subscription.client);
+                continue;
+            }
+            if (std.mem.eql(u8, profile, "durable")) {
+                const message_id = self.next_delivery_id;
+                self.next_delivery_id +%= 1;
+                if (self.next_delivery_id == 0) self.next_delivery_id = 1;
+                const topic_copy = try self.allocator.dupe(u8, topic);
+                errdefer self.allocator.free(topic_copy);
+                const payload_copy = try self.allocator.dupe(u8, payload);
+                errdefer self.allocator.free(payload_copy);
+                const now_ms = @as(u64, @intCast(std.time.milliTimestamp()));
+                try self.durable_pending.put(message_id, .{ .client = subscription.client, .topic = topic_copy, .payload = payload_copy, .expires_at_ms = now_ms + ttl_ms, .retry_at_ms = now_ms + 1000 });
+                subscription.client.sendZmpMessage("durable", message_id, topic, payload) catch |err| std.log.debug("durable delivery failed: {s}", .{@errorName(err)});
+            } else {
+                subscription.client.sendZmpMessage(profile, 0, topic, payload) catch |err| std.log.debug("zigmv delivery failed: {s}", .{@errorName(err)});
+            }
+        }
+        var work_iterator = work_clients.iterator();
+        while (work_iterator.next()) |entry| {
+            entry.value_ptr.*.sendZmpMessage("work", 0, topic, payload) catch |err| std.log.debug("work delivery failed: {s}", .{@errorName(err)});
+        }
+    }
+
+    fn acknowledgeDurable(self: *Broker, client: *Client, message_id: u64) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const pending = self.durable_pending.get(message_id) orelse return false;
+        if (pending.client != client) return false;
+        const removed = self.durable_pending.fetchRemove(message_id).?;
+        self.allocator.free(removed.value.topic);
+        self.allocator.free(removed.value.payload);
+        return true;
     }
 
     fn appendStreamLocked(self: *Broker, topic: []const u8, payload: []const u8) !void {
@@ -1267,7 +1400,7 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
     if (std.mem.eql(u8, operation, "SUB") or std.mem.eql(u8, operation, "UNSUB")) {
         const mode = tokens.next() orelse return zmpError(client, "missing_mode");
         if (!std.mem.eql(u8, mode, "live") and !std.mem.eql(u8, mode, "work") and !std.mem.eql(u8, mode, "durable") and !std.mem.eql(u8, mode, "state") and !std.mem.eql(u8, mode, "exact")) return zmpError(client, "invalid_mode");
-        if (!std.mem.eql(u8, mode, "live") and !std.mem.eql(u8, mode, "work")) return zmpError(client, "mode_not_implemented");
+        if (!std.mem.eql(u8, mode, "live") and !std.mem.eql(u8, mode, "work") and !std.mem.eql(u8, mode, "durable") and !std.mem.eql(u8, mode, "state")) return zmpError(client, "mode_not_implemented");
         const subject = tokens.next() orelse return zmpError(client, "missing_subject");
         var group: ?[]const u8 = null;
         if (std.mem.eql(u8, mode, "work")) {
@@ -1275,7 +1408,20 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
             if (group.?.len == 0 or group.?.len > zigmq.max_topic_length) return zmpError(client, "invalid_group");
         } else if (tokens.next() != null) return zmpError(client, "invalid_command");
         zigmq.validateSubject(subject, true) catch return zmpError(client, "invalid_subject");
-        if (std.mem.eql(u8, operation, "SUB")) {
+        if (client.zigmv_client) {
+            if (std.mem.eql(u8, operation, "SUB")) {
+                broker.subscribeZigmv(client, mode, subject, group) catch |err| {
+                    if (err == error.TooManySubscriptions) return zmpError(client, "subscription_limit");
+                    if (err == error.DuplicateSubscription) return zmpError(client, "duplicate_subscription");
+                    return zmpError(client, "out_of_memory");
+                };
+                if (std.mem.eql(u8, mode, "state")) broker.deliverZigmvState(client, subject);
+                client.sendFmt("{s} OK SUB\r\n", .{expected_magic}) catch return false;
+            } else {
+                _ = broker.unsubscribeZigmv(client, mode, subject);
+                client.sendFmt("{s} OK UNSUB\r\n", .{expected_magic}) catch return false;
+            }
+        } else if (std.mem.eql(u8, operation, "SUB")) {
             _ = broker.subscribe(client, subject, group) catch |err| {
                 if (err == error.TooManySubscriptions) return zmpError(client, "subscription_limit");
                 return zmpError(client, "out_of_memory");
@@ -1291,7 +1437,7 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
     if (std.mem.eql(u8, operation, "PUB")) {
         const mode = tokens.next() orelse return zmpError(client, "missing_mode");
         if (!std.mem.eql(u8, mode, "live") and !std.mem.eql(u8, mode, "work") and !std.mem.eql(u8, mode, "durable") and !std.mem.eql(u8, mode, "state") and !std.mem.eql(u8, mode, "exact")) return zmpError(client, "invalid_mode");
-        if (!std.mem.eql(u8, mode, "live") and !std.mem.eql(u8, mode, "work")) return zmpError(client, "mode_not_implemented");
+        if (!std.mem.eql(u8, mode, "live") and !std.mem.eql(u8, mode, "work") and !std.mem.eql(u8, mode, "durable") and !std.mem.eql(u8, mode, "state")) return zmpError(client, "mode_not_implemented");
         const id_text = tokens.next() orelse return zmpError(client, "missing_id");
         const id: ?u64 = if (std.mem.eql(u8, id_text, "-")) null else std.fmt.parseInt(u64, id_text, 10) catch return zmpError(client, "invalid_id");
         const subject = tokens.next() orelse return zmpError(client, "missing_subject");
@@ -1302,13 +1448,19 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
         if (size > zmp.max_payload_length) return zmpError(client, "payload_too_large");
         const payload = readNatsPayload(reader, broker.allocator, size) catch return zmpError(client, "invalid_payload");
         defer broker.allocator.free(payload);
-        if (std.mem.eql(u8, mode, "work")) broker.publishWork(subject, payload) else broker.publish(subject, payload);
+        if (client.zigmv_client) {
+            if (std.mem.eql(u8, mode, "state")) {
+                broker.setRetained(subject, payload, 0) catch return zmpError(client, "state_store_failed");
+            }
+            broker.publishZigmv(mode, subject, payload, 60_000) catch return zmpError(client, "publish_failed");
+        } else if (std.mem.eql(u8, mode, "work")) broker.publishWork(subject, payload) else broker.publish(subject, payload);
         if (id) |message_id| client.sendFmt("{s} OK PUB {d}\r\n", .{ expected_magic, message_id }) catch return false;
         return true;
     }
     if (std.mem.eql(u8, operation, "ACK")) {
-        _ = std.fmt.parseInt(u64, tokens.next() orelse return zmpError(client, "missing_id"), 10) catch return zmpError(client, "invalid_id");
+        const message_id = std.fmt.parseInt(u64, tokens.next() orelse return zmpError(client, "missing_id"), 10) catch return zmpError(client, "invalid_id");
         if (tokens.next() != null) return zmpError(client, "invalid_command");
+        if (client.zigmv_client and !broker.acknowledgeDurable(client, message_id)) return zmpError(client, "unknown_delivery");
         client.sendFmt("{s} OK ACK\r\n", .{expected_magic}) catch return false;
         return true;
     }

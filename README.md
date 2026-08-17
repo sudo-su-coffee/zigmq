@@ -231,6 +231,7 @@ Read the design first: [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md).
 | [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md) | ZigMV protocol, ADT algorithm, transfer model, and release gates |
 | [`docs/ZMP_V0.2.0_PLAN.md`](docs/ZMP_V0.2.0_PLAN.md) | ZMP beta roadmap and staged delivery profiles |
 | [`docs/ZIGMV_RELEASE_PLAN.md`](docs/ZIGMV_RELEASE_PLAN.md) | ZigMV 0.3.0 and 1.0.0-beta release gates |
+| [`docs/ZIGMV_ROADMAP.md`](docs/ZIGMV_ROADMAP.md) | Version-by-version roadmap from 0.3.0 to 1.0.0-beta |
 | [`docs/ZMP_LIVE_TEST_PLAN.md`](docs/ZMP_LIVE_TEST_PLAN.md) | Live-profile acceptance gates and test matrix |
 | [`docs/ZMP_LIVE_BENCHMARK_2026-08-16.md`](docs/ZMP_LIVE_BENCHMARK_2026-08-16.md) | Recorded beta benchmark results and gate decision |
 | [`docs/RELEASE_0.2.0-beta.1.md`](docs/RELEASE_0.2.0-beta.1.md) | Beta release notes and known limitations |

@@ -171,10 +171,10 @@ python3 scripts/security_hardening_test.py --binary ./zig-out/bin/zigmq
 
 ## Benchmarks
 
-Start a ZMP server and measure live publish acknowledgements and fan-out delivery:
+Start a ZMP-compatible server and measure live publish acknowledgements and fan-out delivery:
 
 ```sh
-zig build run -- --protocol zmp --port 4222
+zig build run -- --protocol zigmv --port 4222
 python3 scripts/benchmark_zmp.py --messages 10000 --subscribers 10 --payload-size 128 --pipeline 1 --ack-publishes
 ```
 
@@ -185,6 +185,32 @@ python3 scripts/benchmark_zmp.py --messages 10000 --subscribers 10 --payload-siz
 ```
 
 Use `--ack-publishes` when you want the acknowledged comparison. Run the matrix with payload sizes of 16, 128, and 1,024 bytes and subscriber counts of 1, 10, and 50. Record the commit, Zig version, optimization mode, CPU, memory, operating system, publish mode, publish rate, delivery rate, and latency. Benchmark numbers are machine-specific and are not performance guarantees.
+
+## Try ZigMV
+
+Start the native unified protocol listener:
+
+```sh
+zig build run -- --protocol zigmv --host 127.0.0.1 --port 4222
+```
+
+A live subscription and no-ack telemetry publish look like this:
+
+```text
+ZMV/1 SUB live sensors.room1.temperature
+ZMV/1 PUB live - sensors.room1.temperature 4
+21.5
+```
+
+A work group uses one shared group name. Each message is delivered to one eligible worker:
+
+```text
+ZMV/1 SUB work jobs.created workers
+ZMV/1 PUB work 42 jobs.created 5
+hello
+```
+
+The current ZigMV foundation enables `live` and `work`. `durable`, `state`, and `exact` remain disabled until their persistence, expiry, recovery, and deduplication tests are complete.
 
 ## ZigMV direction
 
@@ -203,7 +229,8 @@ Read the design first: [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md).
 | [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) | Short installation and first-message guide |
 | [`docs/ZMP_PROTOCOL.md`](docs/ZMP_PROTOCOL.md) | ZMP beta wire format and semantics |
 | [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md) | ZigMV protocol, ADT algorithm, transfer model, and release gates |
-| [`docs/ZMP_V0.2.0_PLAN.md`](docs/ZMP_V0.2.0_PLAN.md) | ADR roadmap and staged delivery profiles |
+| [`docs/ZMP_V0.2.0_PLAN.md`](docs/ZMP_V0.2.0_PLAN.md) | ZMP beta roadmap and staged delivery profiles |
+| [`docs/ZIGMV_RELEASE_PLAN.md`](docs/ZIGMV_RELEASE_PLAN.md) | ZigMV 0.3.0 and 1.0.0-beta release gates |
 | [`docs/ZMP_LIVE_TEST_PLAN.md`](docs/ZMP_LIVE_TEST_PLAN.md) | Live-profile acceptance gates and test matrix |
 | [`docs/ZMP_LIVE_BENCHMARK_2026-08-16.md`](docs/ZMP_LIVE_BENCHMARK_2026-08-16.md) | Recorded beta benchmark results and gate decision |
 | [`docs/RELEASE_0.2.0-beta.1.md`](docs/RELEASE_0.2.0-beta.1.md) | Beta release notes and known limitations |
@@ -215,7 +242,8 @@ Read the design first: [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md).
 ```text
 src/main.zig       broker, listeners, and CLI
 src/root.zig       shared limits, parser helpers, and version
-src/zmp.zig        native ZMP parser, encoder, and tests
+src/zmp.zig        ZMP parser, encoder, and compatibility tests
+src/zigmv_state.zig ACK, retry, and deduplication state primitives
 scripts/            integration tests and benchmarks
 docs/               protocol, release, and user documentation
 assets/             project branding

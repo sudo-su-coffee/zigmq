@@ -7,18 +7,26 @@
 <p align="center"><strong>One lightweight message protocol for services, IoT, and edge systems.</strong></p>
 
 <p align="center">
-  <a href="https://github.com/sudo-su-coffee/zigmq/actions/workflows/ci.yml"><img src="https://github.com/sudo-su-coffee/zigmq/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <a href="https://github.com/sudo-su-coffee/zigmq/releases"><img src="https://img.shields.io/github/v/release/sudo-su-coffee/zigmq?include_prereleases" alt="Latest release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/sudo-su-coffee/zigmq" alt="License"></a>
-</p>
-
-<p>
-  <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Go.svg?variant=secondary&size=sm&logo=go&logoColor=00ADD8&mode=dark" /><img alt="Go" src="https://shieldcn.dev/badge/Go.svg?variant=secondary&size=sm&logo=go&logoColor=00ADD8&mode=light" /></picture>
-  <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Firecracker.svg?variant=secondary&size=sm&logo=amazonaws&logoColor=FF9900&mode=dark" /><img alt="Firecracker" src="https://shieldcn.dev/badge/Firecracker.svg?variant=secondary&size=sm&logo=amazonaws&logoColor=FF9900&mode=light" /></picture>
-  <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/SQLite.svg?variant=secondary&size=sm&logo=sqlite&logoColor=003B57&mode=dark" /><img alt="SQLite" src="https://shieldcn.dev/badge/SQLite.svg?variant=secondary&size=sm&logo=sqlite&logoColor=003B57&mode=light" /></picture>
-  <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/gRPC.svg?variant=secondary&size=sm&logo=grpc&logoColor=6C4A9B&mode=dark" /><img alt="gRPC" src="https://shieldcn.dev/badge/gRPC.svg?variant=secondary&size=sm&logo=grpc&logoColor=6C4A9B&mode=light" /></picture>
-  <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Linux.svg?variant=secondary&size=sm&logo=linux&logoColor=FCC624&mode=dark" /><img alt="Linux" src="https://shieldcn.dev/badge/Linux.svg?variant=secondary&size=sm&logo=linux&logoColor=FCC624&mode=light" /></picture>
-  <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/AGPLv3.svg?variant=secondary&size=sm&logo=gnu&logoColor=A42E2B&mode=dark" /><img alt="AGPL-3.0" src="https://shieldcn.dev/badge/AGPLv3.svg?variant=secondary&size=sm&logo=gnu&logoColor=A42E2B&mode=light" /></picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/ci/sudo-su-coffee/zigmq?workflow=ci.yml&variant=secondary&size=sm&mode=dark" />
+    <img alt="CI status" src="https://shieldcn.dev/github/ci/sudo-su-coffee/zigmq?workflow=ci.yml&variant=secondary&size=sm&mode=light" />
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/release/sudo-su-coffee/zigmq?variant=secondary&size=sm&mode=dark" />
+    <img alt="Latest release" src="https://shieldcn.dev/github/release/sudo-su-coffee/zigmq?variant=secondary&size=sm&mode=light" />
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/license/sudo-su-coffee/zigmq?variant=secondary&size=sm&mode=dark" />
+    <img alt="License" src="https://shieldcn.dev/github/license/sudo-su-coffee/zigmq?variant=secondary&size=sm&mode=light" />
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/stars/sudo-su-coffee/zigmq?variant=secondary&size=sm&mode=dark" />
+    <img alt="GitHub stars" src="https://shieldcn.dev/github/stars/sudo-su-coffee/zigmq?variant=secondary&size=sm&mode=light" />
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/last-commit/sudo-su-coffee/zigmq?variant=secondary&size=sm&mode=dark" />
+    <img alt="Last commit" src="https://shieldcn.dev/github/last-commit/sudo-su-coffee/zigmq?variant=secondary&size=sm&mode=light" />
+  </picture>
 </p>
 
 **zigmq** is a small TCP message broker written in Zig. The `0.4.0` release introduces **ZigMV (Zig Message Protocol)** as the native unified protocol inspired by the useful parts of NATS and MQTT 5.0.

@@ -1,5 +1,7 @@
 const std = @import("std");
 
+pub const zigmv_state = @import("zigmv_state.zig");
+
 pub const version = "0.2.0-beta.1";
 
 pub const max_topic_length: usize = 256;

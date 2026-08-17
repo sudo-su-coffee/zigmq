@@ -6,7 +6,7 @@ const cli = @import("cli.zig");
 const zmp = @import("zmp.zig");
 
 const Allocator = std.mem.Allocator;
-const Protocol = enum { custom, nats, mqtt, zmp };
+const Protocol = enum { custom, nats, mqtt, zmp, zigmv };
 const NatsSubscription = struct { subject: []u8, sid: []u8 };
 const NatsSubscriptionRef = struct { subject: []const u8, sid: []const u8, client: *Client };
 const MqttSubscription = struct { filter: []u8, client: *Client };
@@ -73,6 +73,7 @@ const Client = struct {
     nats_subscriptions: std.ArrayList(NatsSubscription) = .empty,
     mqtt_subscriptions: std.ArrayList([]u8) = .empty,
     zmp_client: bool = false,
+    zigmv_client: bool = false,
 
     fn init(stream: net.Stream, allocator: Allocator, authenticated: bool) Client {
         return .{
@@ -163,9 +164,10 @@ const Client = struct {
         return self.send(&message);
     }
 
-    fn sendZmpMessage(self: *Client, subject: []const u8, payload: []const u8) !void {
+    fn sendZmpMessage(self: *Client, profile: []const u8, subject: []const u8, payload: []const u8) !void {
         var header: [512]u8 = undefined;
-        const header_bytes = try std.fmt.bufPrint(&header, "ZMP/1 MSG live 0 {s} {d}\r\n", .{ subject, payload.len });
+        const magic = if (self.zigmv_client) "ZMV/1" else "ZMP/1";
+        const header_bytes = try std.fmt.bufPrint(&header, "{s} MSG {s} 0 {s} {d}\r\n", .{ magic, profile, subject, payload.len });
         const message = try self.allocator.alloc(u8, header_bytes.len + payload.len + 2);
         errdefer self.allocator.free(message);
         @memcpy(message[0..header_bytes.len], header_bytes);
@@ -473,16 +475,16 @@ const Broker = struct {
         }
     }
 
-    fn deliverCustom(self: *Broker, client: *Client, topic: []const u8, reply: ?[]const u8, payload: []const u8) void {
+    fn deliverCustom(self: *Broker, client: *Client, profile: []const u8, topic: []const u8, reply: ?[]const u8, payload: []const u8) void {
         if (client.last_delivery_generation == self.delivery_generation) return;
         client.last_delivery_generation = self.delivery_generation;
-        if (client.zmp_client)
-            client.sendZmpMessage(topic, payload) catch |err| std.log.debug("zmp delivery failed: {s}", .{@errorName(err)})
+        if (client.zmp_client or client.zigmv_client)
+            client.sendZmpMessage(profile, topic, payload) catch |err| std.log.debug("zmp delivery failed: {s}", .{@errorName(err)})
         else
             client.sendCustomMessage(topic, reply, payload) catch |err| std.log.debug("custom delivery failed: {s}", .{@errorName(err)});
     }
 
-    fn deliverOneGroup(self: *Broker, topic: []const u8, reply: ?[]const u8, payload: []const u8) void {
+    fn deliverOneGroup(self: *Broker, profile: []const u8, topic: []const u8, reply: ?[]const u8, payload: []const u8) void {
         var iterator = self.group_subscribers.iterator();
         while (iterator.next()) |entry| {
             const bucket = entry.value_ptr;
@@ -490,7 +492,7 @@ const Broker = struct {
             if (bucket.next >= bucket.clients.items.len) bucket.next = 0;
             const client = bucket.clients.items[bucket.next];
             bucket.next = (bucket.next + 1) % bucket.clients.items.len;
-            self.deliverCustom(client, topic, reply, payload);
+            self.deliverCustom(client, profile, topic, reply, payload);
         }
     }
 
@@ -561,12 +563,20 @@ const Broker = struct {
         if (self.delivery_generation == 0) self.delivery_generation = 1;
         self.appendStreamLocked(topic, payload) catch |err| std.log.debug("stream append failed: {s}", .{@errorName(err)});
         if (self.exact_subscribers.get(topic)) |list| {
-            for (list.items) |client| self.deliverCustom(client, topic, reply, payload);
+            for (list.items) |client| self.deliverCustom(client, "live", topic, reply, payload);
         }
         for (self.wildcard_subscriptions.items) |subscription| {
-            if (zigmq.subjectMatches(subscription.pattern, topic)) self.deliverCustom(subscription.client, topic, reply, payload);
+            if (zigmq.subjectMatches(subscription.pattern, topic)) self.deliverCustom(subscription.client, "live", topic, reply, payload);
         }
-        self.deliverOneGroup(topic, reply, payload);
+        self.deliverOneGroup("live", topic, reply, payload);
+    }
+
+    fn publishWork(self: *Broker, topic: []const u8, payload: []const u8) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.delivery_generation +%= 1;
+        if (self.delivery_generation == 0) self.delivery_generation = 1;
+        self.deliverOneGroup("work", topic, null, payload);
     }
 
     fn publish(self: *Broker, topic: []const u8, payload: []const u8) void {
@@ -792,6 +802,7 @@ fn parseProtocol(text: []const u8) !Protocol {
     if (std.mem.eql(u8, text, "nats")) return .nats;
     if (std.mem.eql(u8, text, "mqtt")) return .mqtt;
     if (std.mem.eql(u8, text, "zmp")) return .zmp;
+    if (std.mem.eql(u8, text, "zigmv")) return .zigmv;
     return error.InvalidProtocol;
 }
 
@@ -1228,53 +1239,59 @@ fn handleMqttCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reade
 }
 
 fn zmpError(client: *Client, message: []const u8) bool {
-    client.sendFmt("ZMP/1 ERR {s}\r\n", .{message}) catch return false;
+    const magic = if (client.zigmv_client) "ZMV/1" else "ZMP/1";
+    client.sendFmt("{s} ERR {s}\r\n", .{ magic, message }) catch return false;
     return true;
 }
 
 fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader, line: []const u8) bool {
     var tokens = std.mem.tokenizeAny(u8, std.mem.trim(u8, line, " \t\r\n"), " \t");
     const magic = tokens.next() orelse return zmpError(client, "empty_frame");
-    if (!std.mem.eql(u8, magic, "ZMP/1")) return zmpError(client, "invalid_version");
+    const expected_magic = if (client.zigmv_client) "ZMV/1" else "ZMP/1";
+    if (!std.mem.eql(u8, magic, expected_magic)) return zmpError(client, "invalid_version");
     const operation = tokens.next() orelse return zmpError(client, "missing_command");
     if (std.mem.eql(u8, operation, "PING")) {
         if (tokens.next() != null) return zmpError(client, "invalid_command");
-        client.send("ZMP/1 PONG\r\n") catch return false;
+        client.sendFmt("{s} PONG\r\n", .{expected_magic}) catch return false;
         return true;
     }
     if (std.mem.eql(u8, operation, "HELLO")) {
         if (tokens.next() != null) return zmpError(client, "invalid_command");
-        client.send("ZMP/1 READY\r\n") catch return false;
+        client.sendFmt("{s} READY\r\n", .{expected_magic}) catch return false;
         return true;
     }
     if (std.mem.eql(u8, operation, "BYE")) {
-        client.send("ZMP/1 BYE\r\n") catch {};
+        client.sendFmt("{s} BYE\r\n", .{expected_magic}) catch {};
         return false;
     }
     if (std.mem.eql(u8, operation, "SUB") or std.mem.eql(u8, operation, "UNSUB")) {
         const mode = tokens.next() orelse return zmpError(client, "missing_mode");
         if (!std.mem.eql(u8, mode, "live") and !std.mem.eql(u8, mode, "work") and !std.mem.eql(u8, mode, "durable") and !std.mem.eql(u8, mode, "state") and !std.mem.eql(u8, mode, "exact")) return zmpError(client, "invalid_mode");
-        if (!std.mem.eql(u8, mode, "live")) return zmpError(client, "mode_not_implemented");
+        if (!std.mem.eql(u8, mode, "live") and !std.mem.eql(u8, mode, "work")) return zmpError(client, "mode_not_implemented");
         const subject = tokens.next() orelse return zmpError(client, "missing_subject");
-        if (tokens.next() != null) return zmpError(client, "invalid_command");
+        var group: ?[]const u8 = null;
+        if (std.mem.eql(u8, mode, "work")) {
+            group = tokens.next() orelse return zmpError(client, "missing_group");
+            if (group.?.len == 0 or group.?.len > zigmq.max_topic_length) return zmpError(client, "invalid_group");
+        } else if (tokens.next() != null) return zmpError(client, "invalid_command");
         zigmq.validateSubject(subject, true) catch return zmpError(client, "invalid_subject");
         if (std.mem.eql(u8, operation, "SUB")) {
-            _ = broker.subscribe(client, subject, null) catch |err| {
+            _ = broker.subscribe(client, subject, group) catch |err| {
                 if (err == error.TooManySubscriptions) return zmpError(client, "subscription_limit");
                 return zmpError(client, "out_of_memory");
             };
             broker.deliverRetained(client, subject);
-            client.send("ZMP/1 OK SUB\r\n") catch return false;
+            client.sendFmt("{s} OK SUB\r\n", .{expected_magic}) catch return false;
         } else {
             _ = broker.unsubscribe(client, subject);
-            client.send("ZMP/1 OK UNSUB\r\n") catch return false;
+            client.sendFmt("{s} OK UNSUB\r\n", .{expected_magic}) catch return false;
         }
         return true;
     }
     if (std.mem.eql(u8, operation, "PUB")) {
         const mode = tokens.next() orelse return zmpError(client, "missing_mode");
         if (!std.mem.eql(u8, mode, "live") and !std.mem.eql(u8, mode, "work") and !std.mem.eql(u8, mode, "durable") and !std.mem.eql(u8, mode, "state") and !std.mem.eql(u8, mode, "exact")) return zmpError(client, "invalid_mode");
-        if (!std.mem.eql(u8, mode, "live")) return zmpError(client, "mode_not_implemented");
+        if (!std.mem.eql(u8, mode, "live") and !std.mem.eql(u8, mode, "work")) return zmpError(client, "mode_not_implemented");
         const id_text = tokens.next() orelse return zmpError(client, "missing_id");
         const id: ?u64 = if (std.mem.eql(u8, id_text, "-")) null else std.fmt.parseInt(u64, id_text, 10) catch return zmpError(client, "invalid_id");
         const subject = tokens.next() orelse return zmpError(client, "missing_subject");
@@ -1285,14 +1302,14 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
         if (size > zmp.max_payload_length) return zmpError(client, "payload_too_large");
         const payload = readNatsPayload(reader, broker.allocator, size) catch return zmpError(client, "invalid_payload");
         defer broker.allocator.free(payload);
-        broker.publish(subject, payload);
-        if (id) |message_id| client.sendFmt("ZMP/1 OK PUB {d}\r\n", .{message_id}) catch return false;
+        if (std.mem.eql(u8, mode, "work")) broker.publishWork(subject, payload) else broker.publish(subject, payload);
+        if (id) |message_id| client.sendFmt("{s} OK PUB {d}\r\n", .{ expected_magic, message_id }) catch return false;
         return true;
     }
     if (std.mem.eql(u8, operation, "ACK")) {
         _ = std.fmt.parseInt(u64, tokens.next() orelse return zmpError(client, "missing_id"), 10) catch return zmpError(client, "invalid_id");
         if (tokens.next() != null) return zmpError(client, "invalid_command");
-        client.send("ZMP/1 OK ACK\r\n") catch return false;
+        client.sendFmt("{s} OK ACK\r\n", .{expected_magic}) catch return false;
         return true;
     }
     return zmpError(client, "unknown_command");
@@ -1302,6 +1319,7 @@ fn handleClient(broker: *Broker, stream: net.Stream) void {
     const initially_authenticated = broker.auth_token == null;
     var client = Client.init(stream, broker.allocator, initially_authenticated);
     client.zmp_client = broker.protocol == .zmp;
+    client.zigmv_client = broker.protocol == .zigmv;
     defer client.deinit();
     defer stream.close();
     if (broker.addClient(&client)) |_| {} else |_| {
@@ -1319,6 +1337,8 @@ fn handleClient(broker: *Broker, stream: net.Stream) void {
         client.send(if (initially_authenticated) "+OK zigmq ready\r\n" else "+OK zigmq ready auth=required\r\n") catch return;
     } else if (broker.protocol == .zmp) {
         client.send(if (initially_authenticated) "ZMP/1 READY\r\n" else "ZMP/1 READY auth=required\r\n") catch return;
+    } else if (broker.protocol == .zigmv) {
+        client.send(if (initially_authenticated) "ZMV/1 READY\r\n" else "ZMV/1 READY auth=required\r\n") catch return;
     }
 
     var input_buffer: [zigmq.max_control_line_length + 1]u8 = undefined;
@@ -1333,7 +1353,7 @@ fn handleClient(broker: *Broker, stream: net.Stream) void {
             } orelse break :blk false;
             break :blk if (broker.protocol == .nats)
                 handleNatsCommand(broker, &client, &reader, line)
-            else if (broker.protocol == .zmp)
+            else if (broker.protocol == .zmp or broker.protocol == .zigmv)
                 handleZmpCommand(broker, &client, &reader, line)
             else
                 handleCustomCommand(broker, &client, line);
@@ -1414,7 +1434,7 @@ pub fn main() !void {
             std.debug.print("zigmq {s}\n", .{zigmq.version});
             return;
         } else if (std.mem.eql(u8, args[index], "--help")) {
-            std.debug.print("zigmq {s}\nUsage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats|mqtt|zmp] [--auth-token token|--auth-token-file path] [--stream path]\n", .{zigmq.version});
+            std.debug.print("zigmq {s}\nUsage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats|mqtt|zmp|zigmv] [--auth-token token|--auth-token-file path] [--stream path]\n", .{zigmq.version});
             return;
         } else {
             std.debug.print("Unknown argument: {s}\n", .{args[index]});

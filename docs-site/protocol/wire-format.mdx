@@ -78,6 +78,17 @@ ZMV/1 ACK 104\r\n
 ZMV/1 OK ACK\r\n
 ```
 
+## Edge-link frames
+
+Authenticated edge transports use a link frame with a monotonic sequence number and length-delimited payload:
+
+```text
+ZMV/1 LINK 7 durable edge.commands 4\r\n
+OPEN\r\n
+```
+
+The forwarding foundation classifies an incoming sequence as accepted, duplicate, or gap. Duplicate frames can be discarded safely; gaps must trigger cursor recovery or an explicit profile-specific loss decision. The current broker does not yet expose a complete broker-to-broker LINK command, TLS/mTLS transport, or remote cursor exchange; these remain 0.8.0 integration gates.
+
 ## Persistent sessions
 
 A client can claim a durable session after authentication:

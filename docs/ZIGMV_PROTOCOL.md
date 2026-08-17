@@ -145,9 +145,9 @@ NATS and MQTT 5.0 compatibility are optional boundary adapters. They are not sep
 
 ## Release boundaries
 
-### 0.3.0
+### 0.4.0
 
-The 0.3.0 implementation release should stabilize the ZigMV name and `ZMV/1` handshake, implement `live` and `work`, add native end-to-end tests, add no-ack telemetry measurement, document the transfer model, and keep unsupported durable profiles explicitly rejected.
+The grouped 0.4.0 implementation release stabilizes the ZigMV name and `ZMV/1` handshake, implements `live`, `work`, `durable`, and `state`, adds native end-to-end tests, ACK handling, durable stream append, retained-state delivery, expiry checks, and restart-oriented coverage. `exact` remains explicitly rejected until deduplication and crash guarantees are complete.
 
 ### 1.0.0-beta
 

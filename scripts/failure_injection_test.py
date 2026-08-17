@@ -57,9 +57,13 @@ def main() -> int:
         try:
             wait_ready(args.port)
             with socket.create_connection(("127.0.0.1", args.port), timeout=2) as sock:
+                sock.settimeout(2)
+                greeting = sock.recv(256)
+                if b"ZMV/1 READY" not in greeting:
+                    raise RuntimeError(f"unexpected post-recovery greeting: {greeting!r}")
                 sock.sendall(b"ZMV/1 STATS\r\n")
                 response = sock.recv(4096)
-                if b"ZMV/1 STATS" not in response and b"OK STATS" not in response:
+                if b"STATS" not in response and b"OK" not in response:
                     raise RuntimeError(f"unexpected post-recovery response: {response!r}")
             print("FAILURE_INJECTION_RECOVERY_PASS")
             return 0

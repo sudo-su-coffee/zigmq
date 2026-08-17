@@ -2,6 +2,27 @@
 
 All notable changes to zigmq are documented here.
 
+## [0.6.0] - Unreleased
+
+### Added
+
+- Native authenticated ZigMV `STATS` command for process-local operational counters.
+- Counters for publications, deliveries, durable redeliveries, ACKs, expirations, active clients, subscriptions, and pending durable messages.
+- Integration coverage proving STATS framing and retry/ACK counter behavior.
+- Unreleased 0.6.0 release notes and the complete beta-gate checklist through `1.0.0-beta.1`.
+
+### Performance evidence
+
+- Consolidated recorded benchmark data in the README and `docs/ZIGMV_BENCHMARK_0.5.0.md`.
+- Historical local evidence includes 23,563.4 publish-ACK msg/s, 36,618.7 volatile stream-free publish-ACK msg/s, 6,294.2 local-stream publish-ACK msg/s, and 89,066.7 fan-out deliveries/s with 50 subscribers.
+- The 100M msg/s run remains an offered-rate stress target and is not claimed as end-to-end achieved throughput.
+
+### Known limitations
+
+- Native TLS/mTLS, authenticated edge links, bounded offline transfer, durable reconnect sessions, full NATS JetStream semantics, full MQTT 5.0 interoperability, MQTT QoS 2, and ZigMV `exact` remain blocked release gates.
+
+See [`docs/ZIGMV_RELEASE_0.6.0.md`](docs/ZIGMV_RELEASE_0.6.0.md) and [`docs/ZIGMV_BETA_RELEASE_GATES.md`](docs/ZIGMV_BETA_RELEASE_GATES.md).
+
 ## [0.5.0] - Unreleased
 
 ### Added

@@ -87,7 +87,7 @@ zig build run -- --version
 zig build run -- --help
 ```
 
-The current stable release train reports `zigmq 0.4.0` for the version command; the next security work is being developed toward `0.5.0`.
+The current development train reports `zigmq 0.6.0` for the version command. This branch is an unreleased 0.6.0 observability and performance bundle; do not treat it as a published tag until its PR and CI gates pass.
 
 ## Native ZigMV
 
@@ -290,7 +290,7 @@ ZMV/1 PUB work 42 jobs.created 5
 hello
 ```
 
-The `0.4.0` ZigMV train enables `live`, `work`, `durable`, and `state`. `exact` remains disabled until deduplication and crash-recovery guarantees are complete.
+The `0.6.0` development train carries the `live`, `work`, `durable`, and `state` profiles plus native STATS observability. `exact` remains disabled until deduplication and crash-recovery guarantees are complete.
 
 ## ZigMV direction
 
@@ -314,6 +314,7 @@ Read the design first: [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md).
 | [`docs/ZIGMV_EDGE_ARCHITECTURE.png`](docs/ZIGMV_EDGE_ARCHITECTURE.png) | Rendered edge architecture diagram |
 | [`docs/ZIGMV_RELEASE_PLAN.md`](docs/ZIGMV_RELEASE_PLAN.md) | ZigMV release gates and delivery-guarantee boundaries |
 | [`docs/ZIGMV_BETA_RELEASE_GATES.md`](docs/ZIGMV_BETA_RELEASE_GATES.md) | Complete 0.5.0-to-1.0.0-beta implementation, benchmark, and release checklist |
+| [`docs/ZIGMV_RELEASE_0.6.0.md`](docs/ZIGMV_RELEASE_0.6.0.md) | Unreleased 0.6.0 observability and performance bundle |
 | [`docs/ZIGMV_ROADMAP.md`](docs/ZIGMV_ROADMAP.md) | Grouped release trains from 0.4.0 to 1.0.0-beta |
 | [`docs/RELEASE_0.4.0.md`](docs/RELEASE_0.4.0.md) | Grouped 0.4.0 ZigMV release notes and guarantees |
 | [`CHANGELOG.md`](CHANGELOG.md) | Version history |

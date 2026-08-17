@@ -113,6 +113,7 @@ The `-` identifier removes only the publisher response. It does not add persiste
 | `CLAIM` | `ZMV/1 CLAIM <group> <message_id>` | Claim a work item when supported |
 | `RESUME` | `ZMV/1 RESUME <consumer> <sequence>` | Resume a durable consumer |
 | `BYE` | `ZMV/1 BYE` | Graceful disconnect |
+| `STATS` | `ZMV/1 STATS` | Return process-local authenticated broker counters |
 
 ## Transfer model
 
@@ -145,7 +146,22 @@ NATS and MQTT 5.0 compatibility are optional boundary adapters. They are not sep
 
 ZigMV `live` is intentionally comparable to Core NATS or MQTT QoS 0. ZigMV `durable` is currently a bounded, connected-session analogue of an MQTT QoS 1 or JetStream-style acknowledged consumer, but it is not full MQTT QoS 1 interoperability because reconnect sessions and durable consumer cursors are incomplete. MQTT QoS 2 and ZigMV `exact` are not implemented: the required PUBREC/PUBREL/PUBCOMP or equivalent deduplication, crash recovery, and duplicate-suppression state machine is still a later release gate.
 
+## Observability
+
+After authentication, a native ZigMV client may request process-local counters:
+
+```text
+ZMV/1 STATS\r\n
+ZMV/1 STATS clients=3 subscriptions=2 pending=0 published=5 delivered=5 redelivered=1 acknowledged=2 expired=0\r\n
+```
+
+The counters are intended for benchmark integrity, health diagnostics, and local operations. They reset on process restart and are not a distributed metrics protocol. A future operations train must add a structured metrics endpoint, health/readiness status, queue occupancy, blocked-publisher time, memory, disk, and edge-link lag.
+
 ## Release boundaries
+
+### 0.6.0 (development)
+
+The unreleased 0.6.0 train adds native authenticated STATS counters, connected-session durable retry visibility, benchmark evidence, and the release-gate checklist. It does not enable MQTT QoS 2, ZigMV `exact`, durable reconnect sessions, native TLS/mTLS, or remote edge transfer.
 
 ### 0.4.0
 

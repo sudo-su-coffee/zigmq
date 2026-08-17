@@ -17,6 +17,13 @@ const GroupBucket = struct {
     clients: std.ArrayList(*Client) = .empty,
     next: usize = 0,
 };
+const BrokerStats = struct {
+    published: u64 = 0,
+    delivered: u64 = 0,
+    redelivered: u64 = 0,
+    acknowledged: u64 = 0,
+    expired: u64 = 0,
+};
 const DurableDelivery = struct {
     client: *Client,
     topic: []u8,
@@ -307,6 +314,7 @@ const Broker = struct {
     stream_sequence: u64 = 0,
     next_delivery_id: u64 = 1,
     durable_pending: std.AutoHashMap(u64, DurableDelivery),
+    stats: BrokerStats = .{},
     delivery_generation: usize = 0,
 
     fn init(allocator: Allocator, protocol: Protocol, host: []const u8, port: u16, auth_token: ?[]const u8, publish_allow: ?[]const u8, subscribe_allow: ?[]const u8, publish_rate_limit: u32, stream_file: ?std.fs.File) Broker {
@@ -446,6 +454,7 @@ const Broker = struct {
             const pending = self.durable_pending.getPtr(message_id) orelse continue;
             if (pending.expires_at_ms <= now_ms) {
                 if (self.durable_pending.fetchRemove(message_id)) |removed| {
+                    self.stats.expired += 1;
                     self.allocator.free(removed.value.topic);
                     self.allocator.free(removed.value.payload);
                 }
@@ -455,6 +464,7 @@ const Broker = struct {
             const shift: u6 = @intCast(@min(pending.attempts, 5));
             const delay_ms = @min(@as(u64, 30_000), @as(u64, 1_000) << shift);
             pending.retry_at_ms = now_ms + delay_ms;
+            self.stats.redelivered += 1;
             pending.client.sendZmpMessage("durable", message_id, pending.topic, pending.payload) catch |err| {
                 std.log.debug("durable retry failed: {s}", .{@errorName(err)});
             };
@@ -668,6 +678,7 @@ const Broker = struct {
 
     fn publishZigmv(self: *Broker, profile: []const u8, topic: []const u8, payload: []const u8, ttl_ms: u64) !void {
         self.mutex.lock();
+        self.stats.published += 1;
         defer self.mutex.unlock();
         self.delivery_generation +%= 1;
         if (self.delivery_generation == 0) self.delivery_generation = 1;
@@ -693,13 +704,16 @@ const Broker = struct {
                 errdefer self.allocator.free(payload_copy);
                 const now_ms = @as(u64, @intCast(std.time.milliTimestamp()));
                 try self.durable_pending.put(message_id, .{ .client = subscription.client, .topic = topic_copy, .payload = payload_copy, .expires_at_ms = now_ms + ttl_ms, .retry_at_ms = now_ms + 1000 });
+                self.stats.delivered += 1;
                 subscription.client.sendZmpMessage("durable", message_id, topic, payload) catch |err| std.log.debug("durable delivery failed: {s}", .{@errorName(err)});
             } else {
+                self.stats.delivered += 1;
                 subscription.client.sendZmpMessage(profile, 0, topic, payload) catch |err| std.log.debug("zigmv delivery failed: {s}", .{@errorName(err)});
             }
         }
         var work_iterator = work_clients.iterator();
         while (work_iterator.next()) |entry| {
+            self.stats.delivered += 1;
             entry.value_ptr.*.sendZmpMessage("work", 0, topic, payload) catch |err| std.log.debug("work delivery failed: {s}", .{@errorName(err)});
         }
     }
@@ -712,6 +726,7 @@ const Broker = struct {
         const removed = self.durable_pending.fetchRemove(message_id).?;
         self.allocator.free(removed.value.topic);
         self.allocator.free(removed.value.payload);
+        self.stats.acknowledged += 1;
         return true;
     }
 
@@ -1506,6 +1521,17 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
     if (std.mem.eql(u8, operation, "BYE")) {
         client.sendFmt("{s} BYE\r\n", .{expected_magic}) catch {};
         return false;
+    }
+    if (std.mem.eql(u8, operation, "STATS")) {
+        if (!client.zigmv_client or tokens.next() != null) return zmpError(client, "invalid_command");
+        broker.mutex.lock();
+        const stats = broker.stats;
+        const clients = broker.clients.items.len;
+        const subscriptions = broker.zigmv_subscriptions.items.len;
+        const pending = broker.durable_pending.count();
+        broker.mutex.unlock();
+        client.sendFmt("{s} STATS clients={d} subscriptions={d} pending={d} published={d} delivered={d} redelivered={d} acknowledged={d} expired={d}\r\n", .{ expected_magic, clients, subscriptions, pending, stats.published, stats.delivered, stats.redelivered, stats.acknowledged, stats.expired }) catch return false;
+        return true;
     }
     if (std.mem.eql(u8, operation, "SUB") or std.mem.eql(u8, operation, "UNSUB")) {
         const mode = tokens.next() orelse return zmpError(client, "missing_mode");

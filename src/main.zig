@@ -107,6 +107,7 @@ const Client = struct {
     zigmv_client: bool = false,
     publish_window_ms: u64 = 0,
     publish_count: u32 = 0,
+    seen_publish_ids: std.AutoHashMap(u64, void),
 
     fn init(stream: net.Stream, allocator: Allocator, authenticated: bool) Client {
         return .{
@@ -114,6 +115,7 @@ const Client = struct {
             .allocator = allocator,
             .authenticated = authenticated,
             .subscriptions = std.StringHashMap(?[]u8).init(allocator),
+            .seen_publish_ids = std.AutoHashMap(u64, void).init(allocator),
         };
     }
 
@@ -161,6 +163,17 @@ const Client = struct {
         }
         if (self.publish_count >= limit) return false;
         self.publish_count += 1;
+        return true;
+    }
+
+    fn rememberPublishId(self: *Client, message_id: ?u64) !bool {
+        const id = message_id orelse return true;
+        if (self.seen_publish_ids.contains(id)) return false;
+        if (self.seen_publish_ids.count() >= 4096) {
+            var iterator = self.seen_publish_ids.iterator();
+            if (iterator.next()) |entry| _ = self.seen_publish_ids.remove(entry.key_ptr.*);
+        }
+        try self.seen_publish_ids.put(id, {});
         return true;
     }
 
@@ -272,6 +285,7 @@ const Client = struct {
         for (self.queue.items[self.queue_head..]) |message| self.allocator.free(message);
         self.queue.deinit(self.allocator);
         self.subscriptions.deinit();
+        self.seen_publish_ids.deinit();
         for (self.nats_subscriptions.items) |subscription| {
             self.allocator.free(subscription.subject);
             self.allocator.free(subscription.sid);
@@ -1588,6 +1602,11 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
         if (client.zigmv_client) {
             if (!broker.publishSubjectAllowed(subject)) return zmpError(client, "publish_denied");
             if (!client.allowPublishRate(broker.publish_rate_limit)) return zmpError(client, "rate_limited");
+            const fresh_publish = client.rememberPublishId(id) catch return zmpError(client, "out_of_memory");
+            if (!fresh_publish) {
+                if (id) |message_id| client.sendFmt("{s} OK DUP {d}\r\n", .{ expected_magic, message_id }) catch return false;
+                return true;
+            }
             if (std.mem.eql(u8, mode, "state")) {
                 broker.setRetained(subject, payload, 0) catch return zmpError(client, "state_store_failed");
             }

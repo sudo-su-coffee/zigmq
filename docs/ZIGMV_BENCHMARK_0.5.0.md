@@ -1,4 +1,4 @@
-# ZigMV 0.5.0 benchmark and validation evidence
+# ZigMV 0.5.0 and 0.6.0 benchmark and validation evidence
 
 ## Environment
 
@@ -11,16 +11,20 @@ Command:
 ```sh
 zig build -Doptimize=ReleaseFast
 ./zig-out/bin/zigmq --protocol zigmv --host 127.0.0.1 --port 6820
-python3 scripts/benchmark_zigmv.py --messages 16 --payload-size 128 --drain-timeout 5 --port 6820
+python3 scripts/benchmark_zigmv.py --messages 16 --payload-size 128 --drain-timeout 5 --allow-live-loss --port 6820
 python3 scripts/benchmark_zigmv.py --messages 16 --payload-size 128 --drain-timeout 5 --ack-publishes --port 6820
 ```
 
-Both modes passed with zero loss and zero integrity errors.
+Both 16-message modes passed with zero loss and zero integrity errors. The 0.6.0 harness synchronizes no-ACK publishers with a native STATS request before BYE, and reports socket-written, broker-accepted, delivered, lost, delivery-ratio, duplicate, gap, invalid-frame, and backpressure metrics separately.
+
+For the latest repeated 1,000-message, 128-byte workload on the same local ReleaseFast build, the synchronized live run delivered 994/1,000 messages with a 0.994000 delivery ratio and no gaps, duplicates, or invalid frames. This is reported as `PASS_LOSSY_LIVE` when `--allow-live-loss` is supplied because live is an at-most-once profile. The corresponding broker-publish-ACK run delivered 1,000/1,000 messages with zero loss and a 1.000000 delivery ratio.
 
 | Mode | Offered | Accepted | Delivered | Lost | Duplicates | Gaps | Invalid frames |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Live, no publish ACK | 16 | 16 | 16 | 0 | 0 | 0 | 0 |
 | Live, publish ACK | 16 | 16 | 16 | 0 | 0 | 0 | 0 |
+| Live, 1,000 messages, 128-byte payload | 1,000 | 1,000 | 994 | 6 | 0 | 0 | 0 |
+| Live, 1,000 messages, 128-byte payload, publish ACK | 1,000 | 1,000 | 1,000 | 0 | 0 | 0 | 0 |
 
 The small-batch rates are diagnostic only because the drain window and TCP setup dominate the elapsed time. Sustained throughput must be measured with the target-rate mode and a larger message count.
 

@@ -8,6 +8,7 @@ All notable changes to zigmq are documented here.
 
 - Native authenticated ZigMV `STATS` command for process-local operational counters.
 - Counters for publications, deliveries, durable redeliveries, ACKs, expirations, active clients, subscriptions, and pending durable messages.
+- Bounded per-client publish-idempotency windows that return `ZMV/1 OK DUP <id>` without routing repeated numeric IDs; this is a foundation for exactly-once work and not an exactly-once guarantee.
 - Integration coverage proving STATS framing and retry/ACK counter behavior.
 - Unreleased 0.6.0 release notes and the complete beta-gate checklist through `1.0.0-beta.1`.
 
@@ -16,6 +17,8 @@ All notable changes to zigmq are documented here.
 - Consolidated recorded benchmark data in the README and `docs/ZIGMV_BENCHMARK_0.5.0.md`.
 - Historical local evidence includes 23,563.4 publish-ACK msg/s, 36,618.7 volatile stream-free publish-ACK msg/s, 6,294.2 local-stream publish-ACK msg/s, and 89,066.7 fan-out deliveries/s with 50 subscribers.
 - The 100M msg/s run remains an offered-rate stress target and is not claimed as end-to-end achieved throughput.
+- The native benchmark now synchronizes no-ACK runs through STATS before BYE and distinguishes socket-written, broker-accepted, delivered, lost, delivery ratio, duplicates, gaps, invalid frames, and backpressure.
+- The latest recorded 0.6.0 1,000-message, 128-byte live run delivered 994/1,000 messages with a 99.4% ratio under at-most-once overload; the corresponding publish-ACK run delivered 1,000/1,000.
 
 ### Known limitations
 

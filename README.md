@@ -224,7 +224,7 @@ python3 scripts/security_hardening_test.py --binary ./zig-out/bin/zigmq
 
 ## Benchmarks
 
-Start a native ZigMV server and measure live publish acknowledgements and fan-out delivery:
+Start a native ZigMV server and measure the consolidated 0.6.0 live and acknowledged delivery paths:
 
 ```sh
 zig build run -- --protocol zigmv --port 4222
@@ -234,10 +234,12 @@ python3 scripts/benchmark_zigmv.py --duration 10 --target-mps 35000 --payload-si
 That command measures acknowledged publish throughput. For NATS-like one-way live telemetry, omit publisher acknowledgements:
 
 ```sh
-python3 scripts/benchmark_zigmv.py --duration 10 --target-mps 35000 --payload-size 128
+python3 scripts/benchmark_zigmv.py --duration 10 --target-mps 35000 --payload-size 128 --allow-live-loss
 ```
 
-Use `--ack-publishes` when you want the acknowledged comparison. Run the matrix with payload sizes of 16, 128, and 1,024 bytes and subscriber counts of 1, 10, and 50. Record the commit, Zig version, optimization mode, CPU, memory, operating system, publish mode, publish rate, delivery rate, and latency. Benchmark numbers are machine-specific and are not performance guarantees.
+The `live` profile is at-most-once. `--allow-live-loss` makes the harness report `PASS_LOSSY_LIVE` when broker acceptance and frame integrity are correct but overload causes delivery loss; it does not hide gaps, duplicates, or invalid frames. Use `--ack-publishes` for the strict lossless comparison. The harness synchronizes no-ACK runs with native `STATS` before publisher shutdown, so socket-written and broker-accepted counts are not conflated.
+
+Run the matrix with payload sizes of 16, 128, and 1,024 bytes and subscriber counts of 1, 10, and 50. Record the commit, Zig version, optimization mode, CPU, memory, operating system, publish mode, publish rate, delivery rate, delivery ratio, and latency. Benchmark numbers are machine-specific and are not performance guarantees.
 
 ### Recorded benchmark evidence
 
@@ -245,6 +247,8 @@ The following values are real local benchmark artifacts stored under [`benchmark
 
 | Workload | Recorded result |
 | --- | ---: |
+| 0.6.0 live, 1,000 messages, 128-byte payload | **994/1,000 delivered; 99.4% delivery ratio; PASS_LOSSY_LIVE** |
+| 0.6.0 acknowledged live, 1,000 messages, 128-byte payload | **1,000/1,000 delivered; 100% delivery ratio; PASS** |
 | Publish ACK capacity | **23,563.4 msg/s** |
 | 50-subscriber fan-out source rate | **1,781.3 msg/s** |
 | 50-subscriber fan-out deliveries | **89,066.7 deliveries/s** |

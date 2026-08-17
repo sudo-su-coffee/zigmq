@@ -13,7 +13,8 @@ This document describes the current development branch. It is not a published re
 | Native `STATS` command | Authenticated ZigMV clients can request broker counters without opening a separate administration protocol. |
 | Delivery counters | The broker tracks native ZigMV publications, deliveries, redeliveries, durable acknowledgements, and expirations. |
 | Retry visibility | Connected-session durable redelivery is visible through the `redelivered` counter. |
-| Benchmark evidence | README and the benchmark evidence document contain recorded publish, fan-out, stream-cost, realtime, and consumer-group measurements. |
+| Benchmark evidence | README and the benchmark evidence document contain recorded publish, fan-out, stream-cost, realtime, consumer-group, live-loss, and acknowledged delivery measurements. |
+| Bounded publish deduplication | A per-client bounded ID window returns `ZMV/1 OK DUP <id>` for repeated numeric publisher IDs without routing the duplicate. This is a foundation for exactly-once work, not an exactly-once guarantee. |
 | Release gates | The beta-gate document defines the required throughput, latency, recovery, security, compatibility, and edge evidence through `1.0.0-beta.1`. |
 
 ## STATS usage
@@ -43,10 +44,11 @@ The following checks passed on the development branch:
 - Authentication, ACL, and rate-limit integration test
 - End-to-end, edge, stream, CLI, NATS, MQTT, and realtime scenarios
 - Python syntax and whitespace validation
+- Synchronized native benchmark with socket-written, broker-accepted, delivered, loss, delivery-ratio, duplicate, gap, and invalid-frame counters
 
 ## Performance evidence
 
-Recorded local artifacts include 23,563.4 publish-ACK messages/sec, 1,781.3 source messages/sec with 50-subscriber fan-out, 89,066.7 fan-out deliveries/sec, 36,618.7 volatile stream-free publish-ACK messages/sec, and 6,294.2 publish-ACK messages/sec with local stream append. These values are machine-specific regression evidence, not universal capacity guarantees.
+Recorded local artifacts include 23,563.4 publish-ACK messages/sec, 1,781.3 source messages/sec with 50-subscriber fan-out, 89,066.7 fan-out deliveries/sec, 36,618.7 volatile stream-free publish-ACK messages/sec, and 6,294.2 publish-ACK messages/sec with local stream append. The latest repeated consolidated 0.6.0 run delivered 994/1,000 live messages at 128 bytes with a 99.4% delivery ratio under an at-most-once overload workload, and 1,000/1,000 with broker publish acknowledgements. These values are machine-specific regression evidence, not universal capacity guarantees.
 
 The 100M messages/sec test remains an offered-rate stress target. It must not be described as achieved end-to-end throughput until a compiled multi-publisher workload demonstrates accepted, queued, delivered, and acknowledged counts with complete integrity.
 

@@ -1,0 +1,102 @@
+---
+title: Quickstart
+description: Build and run a local ZigMV 0.6.0 broker.
+---
+
+# Quickstart
+
+## Requirements
+
+ZigMV 0.6.0 is developed and tested with **Zig 0.15.2** on Linux. The repository includes Zig unit tests, Python integration tests, and a native ZigMV benchmark harness.
+
+## Build
+
+Clone the repository and build the optimized binary:
+
+```sh
+git clone https://github.com/sudo-su-coffee/zigmq.git
+cd zigmq
+zig build -Doptimize=ReleaseFast
+./zig-out/bin/zigmq --version
+```
+
+The 0.6.0 development train reports:
+
+```text
+zigmq 0.6.0
+```
+
+## Start a broker
+
+Start a native ZigMV listener:
+
+```sh
+./zig-out/bin/zigmq \
+  --protocol zigmv \
+  --host 127.0.0.1 \
+  --port 4222
+```
+
+For a protected development listener, configure authentication and subject policy:
+
+```sh
+./zig-out/bin/zigmq \
+  --protocol zigmv \
+  --auth-token-file ./data/zigmv.token \
+  --publish-allow 'telemetry.>' \
+  --subscribe-allow 'telemetry.>' \
+  --publish-rate-limit 35000
+```
+
+The current TCP transport is plaintext. Use a protected network or TLS-terminating proxy until native TLS/mTLS is implemented.
+
+## Native handshake
+
+A client receives:
+
+```text
+ZMV/1 READY auth=required
+```
+
+Authenticate before protocol operations:
+
+```text
+ZMV/1 AUTH edge-secret
+ZMV/1 OK AUTH
+```
+
+Subscribe to live telemetry:
+
+```text
+ZMV/1 SUB live site.factory.temperature
+ZMV/1 OK SUB
+```
+
+Publish a replaceable sample without a publisher acknowledgement:
+
+```text
+ZMV/1 PUB live - site.factory.temperature 2
+21
+```
+
+For an acknowledged publish, use a numeric message ID:
+
+```text
+ZMV/1 PUB durable 42 device.command 4
+OPEN
+ZMV/1 OK PUB 42
+```
+
+## Run the tests
+
+```sh
+zig build test
+python3 scripts/zigmv_test.py --binary ./zig-out/bin/zigmq
+python3 scripts/security_hardening_test.py --binary ./zig-out/bin/zigmq
+```
+
+The complete repository matrix also covers edge, stream, CLI, NATS, MQTT, and realtime scenarios.
+
+<Warning>
+A publisher acknowledgement means the broker accepted the message. It does not by itself prove that a consumer processed the message. Use `durable` and consumer `ACK` for connected-session acknowledged delivery.
+</Warning>

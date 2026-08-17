@@ -1,0 +1,30 @@
+---
+title: ZigMV 0.6.0
+description: The completed 0.6.0 release train and its verified boundaries.
+---
+
+# ZigMV 0.6.0
+
+Version 0.6.0 completes the first security, reliability, observability, and documentation release train for native ZMV/1.
+
+## Included
+
+The broker supports `live`, `work`, `durable`, and `state` profiles; native authentication; subject-based publish and subscribe ACLs; per-client publish rate limiting; process-local `STATS`; bounded connected-session durable redelivery with exponential backoff; and a bounded per-client publish-idempotency window returning `OK DUP` for repeated numeric IDs.
+
+The repository also includes a synchronized, backpressure-aware Python benchmark harness that distinguishes socket acceptance, broker acceptance, and end-to-end delivery. The self-hosted Mintlify documentation site is maintained under `docs-site/`.
+
+## Verification
+
+Run the local checks from the repository root:
+
+```sh
+zig build test
+python3 -m unittest discover -s tests -p 'test_*.py'
+python3 scripts/benchmark_zigmv.py --messages 1000 --payload-size 128 --ack-publishes
+```
+
+For release work, use ReleaseFast, record the machine and commit, and attach the raw benchmark output. Do not compare a ten-message probe with a sustained workload.
+
+## Known limitations
+
+Persistent sessions across restart, crash-safe durable state recovery, native TLS/mTLS, remote edge links, complete MQTT 5.0 QoS 2 compatibility, complete NATS JetStream parity, and exactly-once side effects remain future release gates. The current release is a high-efficiency protocol foundation, not a claim that every NATS or MQTT feature has been reproduced.

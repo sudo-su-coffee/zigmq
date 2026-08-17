@@ -1,0 +1,94 @@
+---
+title: Wire format
+description: Native ZMV/1 framing and command examples.
+---
+
+# Wire format
+
+The initial ZigMV transport is TCP. Control headers are ASCII and CRLF terminated. Payloads are length-delimited and may contain binary bytes.
+
+```text
+ZMV/1 COMMAND arguments\r\n
+[payload bytes]\r\n
+```
+
+## Handshake and authentication
+
+```text
+ZMV/1 READY auth=required\r\n
+ZMV/1 AUTH edge-secret\r\n
+ZMV/1 OK AUTH\r\n
+```
+
+Unauthenticated clients are limited to a bounded number of pre-auth commands. The broker rejects protocol operations until authentication succeeds when an auth token is configured.
+
+## Subscribe
+
+```text
+ZMV/1 SUB live telemetry.site1\r\n
+ZMV/1 OK SUB\r\n
+```
+
+Work subscriptions include a group:
+
+```text
+ZMV/1 SUB work jobs.factory workers\r\n
+```
+
+## Publish
+
+A no-ack live publish uses `-`:
+
+```text
+ZMV/1 PUB live - telemetry.site1 5\r\n
+21.5\r\n
+```
+
+An acknowledged publish uses a numeric publisher ID:
+
+```text
+ZMV/1 PUB durable 42 device.command 4\r\n
+OPEN\r\n
+ZMV/1 OK PUB 42\r\n
+```
+
+A repeated numeric ID from the same client is recognized inside the bounded idempotency window:
+
+```text
+ZMV/1 PUB work 42 jobs.factory 4\r\n
+OPEN\r\n
+ZMV/1 OK DUP 42\r\n
+```
+
+`OK DUP` prevents the repeated publication from being routed again. It is not an exactly-once guarantee across process restart or reconnect.
+
+## Delivery and acknowledgement
+
+A native delivery includes profile, delivery ID, subject, and payload length:
+
+```text
+ZMV/1 MSG durable 104 device.command 4\r\n
+OPEN\r\n
+```
+
+The consumer acknowledges the delivery:
+
+```text
+ZMV/1 ACK 104\r\n
+ZMV/1 OK ACK\r\n
+```
+
+## Operational counters
+
+Authenticated native clients can request process-local counters:
+
+```text
+ZMV/1 STATS\r\n
+ZMV/1 STATS clients=3 subscriptions=2 pending=0 published=5 delivered=5 redelivered=1 acknowledged=2 expired=0\r\n
+```
+
+Counters reset when the broker restarts. They are intended for local operations and benchmark integrity, not distributed observability.
+
+## Limits
+
+The broker enforces bounded frame, payload, subscription, client, pre-auth, rate-limit, and mailbox limits. A bounded system can apply backpressure or expose loss rather than growing memory without limit.

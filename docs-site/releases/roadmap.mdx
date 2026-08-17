@@ -1,0 +1,29 @@
+---
+title: Roadmap to 1.0.0-beta
+description: Grouped release trains and measurable ZigMV release gates.
+---
+
+# Roadmap to 1.0.0-beta
+
+ZigMV follows grouped release trains. A version is released only when its implementation, tests, benchmark evidence, documentation, and CI integrity gates agree.
+
+| Train | Focus | Exit evidence |
+| --- | --- | --- |
+| 0.6.0 | Profiles, native auth and ACLs, rate limits, STATS, bounded durable redelivery, publish idempotency window, self-hosted docs | Version gate, Zig tests, integration tests, benchmark integrity, docs navigation. |
+| 0.7.0 | Persistent durable sessions and crash-safe recovery | Restart tests for append, ACK, cursor, expiry, replay, duplicate suppression, and corruption handling. |
+| 0.8.0 | Edge links and reconnect semantics | TLS/mTLS, identity, export/import filters, reconnect backoff, bounded offline queues, lag and retry metrics. |
+| 0.9.0 | Performance and protocol hardening | Routing-index benchmark, compiled multi-publisher client, fuzzing, soak tests, memory/CPU budgets, adapter overhead report. |
+| 0.10.0 | Compatibility completion | MQTT 5.0 mapping matrix, NATS core and JetStream boundary tests, request/reply, shared groups, retained/state behavior. |
+| 1.0.0-beta | Release candidate stabilization | No open P0/P1 defects, reproducible release artifacts, security review, recovery drill, migration guide, and signed benchmark evidence. |
+
+## 0.7.0 implementation sequence
+
+First define the on-disk record format and versioned metadata. Then append publications and ACK transitions with checksums and atomic commit markers. On startup, scan and truncate only incomplete tails, rebuild subject indexes, restore retained state, and reconstruct pending durable deliveries. Finally, add restart and power-loss simulation tests before enabling the feature by default.
+
+## Beta non-goals
+
+The beta should not claim replicated consensus, global exactly-once side effects, unlimited retained history, or protocol parity that is not covered by conformance tests. Clear boundaries are part of release quality.
+
+## Performance principle
+
+The target is not a single headline number. Each release must publish accepted throughput, end-to-end delivered throughput, p50/p95/p99 latency, bytes/sec, loss, duplicate and gap counts, CPU, peak memory, and backpressure under a fixed environment. A 100M offered-rate stress test is useful only when the harness reports what the broker accepted and what consumers actually received.

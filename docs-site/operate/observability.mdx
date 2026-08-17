@@ -1,0 +1,32 @@
+---
+title: Observability
+description: Inspect broker counters and measure the native delivery path.
+---
+
+# Observability
+
+After authentication, request process-local broker counters:
+
+```text
+ZMV/1 STATS\r\n
+ZMV/1 STATS clients=3 subscriptions=2 pending=0 published=5 delivered=5 redelivered=1 acknowledged=2 expired=0\r\n
+```
+
+## Counters
+
+| Counter | Meaning |
+| --- | --- |
+| `clients` | Active client connections. |
+| `subscriptions` | Active native ZigMV subscriptions. |
+| `pending` | Connected-session durable deliveries waiting for ACK. |
+| `published` | Native ZigMV publications accepted by the broker process. |
+| `delivered` | Native deliveries enqueued for matching consumers. |
+| `redelivered` | Durable retry deliveries. |
+| `acknowledged` | Durable consumer ACKs accepted. |
+| `expired` | Pending durable messages removed after expiry. |
+
+Counters reset on process restart and are not a distributed metrics system. Use them to reconcile a local benchmark and detect whether a publisher reached the broker before its socket closed.
+
+## What to add before 1.0.0-beta
+
+The release gates require structured metrics for queue occupancy, blocked-publisher time, p50/p95/p99 latency, bytes/sec, CPU, peak memory, disk append latency, connection churn, edge-link lag, retries, and drops. The current STATS command is intentionally small so it does not add an administration protocol to the native hot path.

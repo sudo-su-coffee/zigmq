@@ -21,12 +21,16 @@
   <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/AGPLv3.svg?variant=secondary&size=sm&logo=gnu&logoColor=A42E2B&mode=dark" /><img alt="AGPL-3.0" src="https://shieldcn.dev/badge/AGPLv3.svg?variant=secondary&size=sm&logo=gnu&logoColor=A42E2B&mode=light" /></picture>
 </p>
 
-**zigmq** is a small TCP message broker written in Zig. The `0.4.0` release introduces **ZigMV (Zig Message Protocol)** as the native unified protocol inspired by the useful parts of NATS and MQTT 5.0.
+**zigmq** is a small TCP message broker written in Zig. The `0.6.0` release train delivers **ZigMV (Zig Message Protocol)** as the native unified protocol inspired by the useful parts of NATS and MQTT 5.0.
 
 ZigMV uses one protocol and one message model for backend services, sensors, gateways, and edge applications. The native path provides live telemetry, work groups, durable delivery, and retained state without requiring separate client libraries. Existing custom, NATS-compatible, and MQTT-compatible listeners remain available as migration surfaces.
 
-> The project is now preparing the `0.5.0` security and edge-transfer train. Native TLS/mTLS and remote edge-link transfer remain gated work; the currently implemented security foundation includes authentication, subject ACLs, subscription limits, and per-client publish rate limits.
+> ZigMV `0.6.0` is the current development release train. It includes authentication, subject ACLs, subscription limits, per-client publish rate limits, STATS counters, bounded durable redelivery, and a publish-idempotency window. Native TLS/mTLS, persistent sessions, and remote edge-link transfer remain gated work.
 
+
+## Documentation
+
+The separate self-hostable [Mintlify documentation site](docs-site/) contains the protocol guide, wire format, delivery guarantees, benchmarking method, security guidance, edge architecture, MQTT/NATS adapter notes, and the roadmap to `1.0.0-beta`.
 
 ## Why zigmq?
 
@@ -44,7 +48,7 @@ ZigMV uses one protocol and one message model for backend services, sensors, gat
 
 ### Download a beta binary
 
-Open the [0.4.0 release](https://github.com/sudo-su-coffee/zigmq/releases/tag/v0.4.0) and download the archive for your platform when available.
+Open the [GitHub releases](https://github.com/sudo-su-coffee/zigmq/releases) page and select the published release or pre-release for your platform when available.
 
 ### Build from source
 

@@ -1,0 +1,53 @@
+---
+title: Delivery profiles
+description: Choose live, work, durable, or state behavior per message.
+---
+
+# Delivery profiles
+
+ZigMV profiles are explicit application choices. They do not silently upgrade a volatile message into a durable one.
+
+## `live`
+
+`live` is a low-overhead, at-most-once profile for replaceable events. It resembles the operational intent of Core NATS or MQTT QoS 0. A message can be lost when a consumer is disconnected, overloaded, or when a bounded queue reaches its limit.
+
+Use it for high-rate telemetry, metrics, presence heartbeats, and progress updates where a later sample supersedes an earlier sample.
+
+## `work`
+
+`work` distributes a matching message to one eligible member of a named group. The broker rotates through group members and keeps resource limits bounded. Applications must test fairness and decide whether the job should be retried at the application layer or moved to `durable`.
+
+Use it for image-processing jobs, command workers, edge actions, and service task queues.
+
+## `durable`
+
+`durable` assigns a delivery ID, tracks the pending consumer delivery, and waits for `ACK`. If the connected consumer does not acknowledge before the retry deadline, the broker redelivers with bounded exponential backoff until the message expires.
+
+The 0.6.0 implementation is a **connected-session at-least-once foundation**. It does not yet provide persistent consumer cursors across restart, durable reconnect sessions, or exactly-once behavior.
+
+```text
+ZMV/1 MSG durable 104 device.command 4
+OPEN
+ZMV/1 ACK 104
+ZMV/1 OK ACK
+```
+
+A redelivered message can be seen more than once. Consumers must be idempotent using the delivery ID or an application correlation key.
+
+## `state`
+
+`state` retains the latest value for a subject and delivers it to a matching subscriber. State has an expiry policy and is appropriate for current configuration, online status, and latest device readings.
+
+## `exact`
+
+`exact` is intentionally rejected in 0.6.0. The bounded publish-idempotency window and duplicate `OK DUP` response are foundations for future deduplication, not proof of exactly-once delivery. Enabling `exact` requires crash-safe state, duplicate ACK handling, restart recovery, and conformance tests.
+
+## Selection guide
+
+| Requirement | Profile |
+| --- | --- |
+| Lowest latency and replaceable events | `live` |
+| One worker per job | `work` |
+| Consumer acknowledgement and retry in a connected session | `durable` |
+| Latest-value state for late subscribers | `state` |
+| Proven exactly-once side effects | Not available yet |

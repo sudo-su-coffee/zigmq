@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const zigmv_state = @import("zigmv_state.zig");
+pub const zigmv_persist = @import("zigmv_persist.zig");
 
 pub const version = "0.6.0";
 

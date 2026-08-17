@@ -1,0 +1,50 @@
+---
+title: Security
+description: Configure authentication, subject authorization, rate limits, and bounded resources.
+---
+
+# Security
+
+ZigMV separates authentication, authorization, transport protection, and resource protection.
+
+## Authentication
+
+Configure a token for native clients:
+
+```sh
+./zig-out/bin/zigmq \
+  --protocol zigmv \
+  --auth-token-file ./data/zigmv.token
+```
+
+A client must complete `ZMV/1 AUTH <token>` before subscribing or publishing. Pre-auth commands are bounded to prevent unauthenticated resource exhaustion.
+
+## Subject ACLs
+
+Publish and subscribe policies are configured independently:
+
+```sh
+./zig-out/bin/zigmq \
+  --publish-allow 'device.>' \
+  --subscribe-allow 'telemetry.>'
+```
+
+A denied operation receives an explicit authorization error. Subject wildcards are validated before policy matching.
+
+## Rate limits and resource limits
+
+Limit native publish rate per client:
+
+```sh
+./zig-out/bin/zigmq --publish-rate-limit 35000
+```
+
+The broker also bounds clients, subscriptions, payload size, control-line size, mailbox messages, and mailbox bytes. These limits are important on edge systems where one faulty client must not consume all memory.
+
+## Current transport boundary
+
+The current native TCP transport is plaintext. Use a protected network or TLS-terminating proxy in production until native TLS/mTLS and certificate identity mapping are complete. Do not expose a token-only plaintext listener to an untrusted network.
+
+## Security test matrix
+
+The repository tests valid and invalid authentication, pre-auth command limits, publish ACL denial, subscribe ACL denial, allowed subjects, rate-limit enforcement, oversized input, and bounded resource behavior. The 1.0.0-beta gates additionally require TLS/mTLS, credential rotation, tenant isolation, audit-safe logs, and hostile-input fuzzing.

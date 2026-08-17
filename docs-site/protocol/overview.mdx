@@ -1,0 +1,18 @@
+---
+title: Protocol overview
+description: Understand ZigMV’s unified subject, profile, and bounded-delivery model.
+---
+
+# Protocol overview
+
+ZigMV is a compact messaging protocol for services, IoT devices, and edge gateways. It combines NATS-like subjects, request/reply, and work sharing with MQTT-like retained state, expiry, constrained-device orientation, and explicit delivery choices.
+
+The protocol has one canonical subject space and four implemented profiles. A publisher chooses the profile for each message. The router authenticates the client, authorizes the subject, matches subscriptions, and applies the selected delivery behavior without requiring separate hot-path brokers.
+
+```text
+client -> authenticate -> authorize -> match subject -> apply profile -> deliver
+```
+
+The design is intentionally bounded. Payloads, clients, subscriptions, mailboxes, pre-auth commands, pending durable deliveries, and publish rates have explicit limits. Under overload, ZigMV exposes backpressure or profile-appropriate loss rather than allowing unbounded memory growth.
+
+For exact command syntax, see [Wire format](/protocol/wire-format). For delivery choices, see [Delivery profiles](/protocol/profiles). For the claims and non-claims of 0.6.0, see [Guarantees and boundaries](/protocol/guarantees).

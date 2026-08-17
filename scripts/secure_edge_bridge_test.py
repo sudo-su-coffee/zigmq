@@ -61,6 +61,8 @@ def main() -> int:
         assert b"ZMV/1 READY" in read_until(publisher, b"\r\n")
         publisher.sendall(b"ZMV/1 AUTH edge-secret\r\n")
         assert b"OK AUTH" in read_until(publisher, b"\r\n")
+        # Allow the outbound TLS LINK worker to complete its authenticated peer handshake.
+        time.sleep(1.0)
         publisher.sendall(b"ZMV/1 PUB live 1 telemetry.secure 12\r\nhello-secure\r\n")
         assert b"OK PUB" in read_until(publisher, b"\r\n")
         delivered = read_until(subscriber, b"hello-secure")

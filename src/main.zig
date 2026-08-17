@@ -5,6 +5,7 @@ const zigmq = @import("zigmq");
 const cli = @import("cli.zig");
 const zmp = @import("zmp.zig");
 const persist = zigmq.zigmv_persist;
+const metrics = zigmq.metrics;
 
 const Allocator = std.mem.Allocator;
 const Protocol = enum { custom, nats, mqtt, zmp, zigmv };
@@ -402,6 +403,21 @@ const Broker = struct {
                 std.log.debug("session replay failed: {s}", .{@errorName(err)});
             };
         }
+    }
+
+    fn metricsSnapshot(self: *Broker) metrics.Snapshot {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return .{
+            .clients = self.clients.items.len,
+            .subscriptions = self.zigmv_subscriptions.items.len,
+            .pending_durable = self.durable_pending.count(),
+            .published_total = self.stats.published,
+            .delivered_total = self.stats.delivered,
+            .redelivered_total = self.stats.redelivered,
+            .acknowledged_total = self.stats.acknowledged,
+            .expired_total = self.stats.expired,
+        };
     }
 
     fn publishSubjectAllowed(self: *Broker, subject: []const u8) bool {
@@ -1710,6 +1726,33 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
     return zmpError(client, "unknown_command");
 }
 
+fn metricsLoop(broker: *Broker, server: *net.Server) void {
+    var request_buffer: [1024]u8 = undefined;
+    while (!stop_requested.load(.seq_cst)) {
+        const connection = server.accept() catch |err| {
+            if (err == error.WouldBlock or err == error.Interrupted) {
+                std.Thread.sleep(10 * std.time.ns_per_ms);
+                continue;
+            }
+            if (stop_requested.load(.seq_cst)) break;
+            std.log.debug("metrics accept failed: {s}", .{@errorName(err)});
+            continue;
+        };
+        defer connection.stream.close();
+        const received = connection.stream.read(&request_buffer) catch continue;
+        if (received == 0 or !std.mem.startsWith(u8, request_buffer[0..received], "GET /metrics ")) {
+            connection.stream.writeAll("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n") catch {};
+            continue;
+        }
+        var body_buffer: [4096]u8 = undefined;
+        const body = metrics.format(broker.metricsSnapshot(), zigmq.version, &body_buffer) catch continue;
+        var response_header: [256]u8 = undefined;
+        const header = std.fmt.bufPrint(&response_header, "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4; charset=utf-8\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n", .{body.len}) catch continue;
+        connection.stream.writeAll(header) catch continue;
+        connection.stream.writeAll(body) catch {};
+    }
+}
+
 fn handleClient(broker: *Broker, stream: net.Stream) void {
     const initially_authenticated = broker.auth_token == null;
     var client = Client.init(stream, broker.allocator, initially_authenticated);
@@ -1795,6 +1838,7 @@ pub fn main() !void {
     var publish_allow: ?[]const u8 = null;
     var subscribe_allow: ?[]const u8 = null;
     var publish_rate_limit: u32 = 0;
+    var metrics_port: u16 = 0;
     var auth_token_owned: ?[]u8 = null;
     defer if (auth_token_owned) |token| {
         std.crypto.secureZero(u8, token);
@@ -1837,6 +1881,10 @@ pub fn main() !void {
             index += 1;
             if (index >= args.len) return error.MissingPublishRateLimit;
             publish_rate_limit = std.fmt.parseInt(u32, args[index], 10) catch return error.InvalidPublishRateLimit;
+        } else if (std.mem.eql(u8, args[index], "--metrics-port")) {
+            index += 1;
+            if (index >= args.len) return error.MissingMetricsPort;
+            metrics_port = parsePort(args[index]) catch return error.InvalidMetricsPort;
         } else if (std.mem.eql(u8, args[index], "--stream")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingStreamPath;
@@ -1849,7 +1897,7 @@ pub fn main() !void {
             std.debug.print("zigmq {s}\n", .{zigmq.version});
             return;
         } else if (std.mem.eql(u8, args[index], "--help")) {
-            std.debug.print("zigmq {s}\nUsage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats|mqtt|zmp|zigmv] [--auth-token token|--auth-token-file path] [--publish-allow subject[,subject...]] [--subscribe-allow subject[,subject...]] [--publish-rate-limit messages_per_second] [--stream path] [--session-store path]\n", .{zigmq.version});
+            std.debug.print("zigmq {s}\nUsage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats|mqtt|zmp|zigmv] [--auth-token token|--auth-token-file path] [--publish-allow subject[,subject...]] [--subscribe-allow subject[,subject...]] [--publish-rate-limit messages_per_second] [--metrics-port port] [--stream path] [--session-store path]\n", .{zigmq.version});
             return;
         } else {
             std.debug.print("Unknown argument: {s}\n", .{args[index]});
@@ -1894,6 +1942,15 @@ pub fn main() !void {
     try broker.recoverSessionJournal();
     var threads: std.ArrayList(std.Thread) = .empty;
     defer threads.deinit(allocator);
+    var metrics_server: ?net.Server = null;
+    var metrics_thread: ?std.Thread = null;
+    if (metrics_port != 0) {
+        const metrics_address = try net.Address.parseIp4(host, metrics_port);
+        metrics_server = try metrics_address.listen(.{ .reuse_address = true, .force_nonblocking = true });
+        metrics_thread = try std.Thread.spawn(.{}, metricsLoop, .{ &broker, &metrics_server.? });
+    }
+    defer if (metrics_server) |*listener| listener.deinit();
+    defer if (metrics_thread) |thread| thread.join();
 
     std.debug.print("zigmq listening on {s}:{d} protocol={s}\n", .{ host, port, @tagName(protocol) });
     while (!stop_requested.load(.seq_cst)) {

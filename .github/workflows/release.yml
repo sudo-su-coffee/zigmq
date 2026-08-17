@@ -58,6 +58,7 @@ jobs:
             echo "Tag already exists: $RELEASE_VERSION"
             exit 1
           fi
+          python3 scripts/release_gate_check.py --root . --expected-version "${RELEASE_VERSION#v}"
           zig build test
           zig build -Doptimize=ReleaseFast
           expected_version="${RELEASE_VERSION#v}"
@@ -81,6 +82,7 @@ jobs:
           checksum="${archive}.sha256"
           tar -C dist -czf "$archive" zigmq README.md LICENSE
           sha256sum "$archive" > "$checksum"
+          sha256sum dist/* > dist/SHA256SUMS
 
       - name: Generate categorized release notes
         env:
@@ -115,4 +117,4 @@ jobs:
           if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
             args+=("--prerelease")
           fi
-          gh release create "${args[@]}" dist/*.tar.gz dist/*.sha256
+          gh release create "${args[@]}" dist/*.tar.gz dist/*.sha256 dist/SHA256SUMS

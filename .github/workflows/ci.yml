@@ -27,7 +27,7 @@ jobs:
         run: zig build
 
       - name: Version metadata
-        run: ./zig-out/bin/zigmq --version | grep -F 'zigmq 0.6.0'
+        run: ./zig-out/bin/zigmq --version 2>&1 | grep -F 'zigmq 0.6.0'
 
       - name: ZigMV smoke test
         run: python3 scripts/zigmv_test.py --binary ./zig-out/bin/zigmq --port 4230

@@ -1740,14 +1740,20 @@ fn metricsLoop(broker: *Broker, server: *net.Server) void {
         };
         defer connection.stream.close();
         const received = connection.stream.read(&request_buffer) catch continue;
-        if (received == 0 or !std.mem.startsWith(u8, request_buffer[0..received], "GET /metrics ")) {
+        if (received == 0) continue;
+        const request = request_buffer[0..received];
+        const is_metrics = std.mem.startsWith(u8, request, "GET /metrics ");
+        const is_health = std.mem.startsWith(u8, request, "GET /health ");
+        const is_ready = std.mem.startsWith(u8, request, "GET /readyz ");
+        if (!is_metrics and !is_health and !is_ready) {
             connection.stream.writeAll("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n") catch {};
             continue;
         }
         var body_buffer: [4096]u8 = undefined;
-        const body = metrics.format(broker.metricsSnapshot(), zigmq.version, &body_buffer) catch continue;
+        const body = if (is_metrics) metrics.format(broker.metricsSnapshot(), zigmq.version, &body_buffer) catch continue else "ok\n";
         var response_header: [256]u8 = undefined;
-        const header = std.fmt.bufPrint(&response_header, "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4; charset=utf-8\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n", .{body.len}) catch continue;
+        const content_type = if (is_metrics) "text/plain; version=0.0.4; charset=utf-8" else "text/plain; charset=utf-8";
+        const header = std.fmt.bufPrint(&response_header, "HTTP/1.1 200 OK\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n", .{ content_type, body.len }) catch continue;
         connection.stream.writeAll(header) catch continue;
         connection.stream.writeAll(body) catch {};
     }

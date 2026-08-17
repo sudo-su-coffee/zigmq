@@ -22,6 +22,14 @@ def main(binary: str, broker_port: int, metrics_port: int) -> None:
         connection.close()
         if response.status != 200:
             raise RuntimeError(f"unexpected metrics status: {response.status}")
+        for endpoint in ("/health", "/readyz"):
+            connection = http.client.HTTPConnection("127.0.0.1", metrics_port, timeout=3)
+            connection.request("GET", endpoint)
+            health_response = connection.getresponse()
+            health_body = health_response.read().decode("utf-8")
+            connection.close()
+            if health_response.status != 200 or health_body != "ok\n":
+                raise RuntimeError(f"{endpoint} check failed: {health_response.status} {health_body!r}")
         if "text/plain" not in response.getheader("Content-Type", ""):
             raise RuntimeError("metrics response did not advertise text exposition")
         for metric in ("zigmv_build_info", "zigmv_clients", "zigmv_published_total", "zigmv_pending_durable"):

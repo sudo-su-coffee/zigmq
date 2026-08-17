@@ -29,11 +29,13 @@ Counters reset on process restart and are not a distributed metrics system. Use 
 
 ## Prometheus endpoint
 
-Start an optional local HTTP listener for Prometheus scraping:
+Start an optional local HTTP listener for Prometheus scraping and service health checks:
 
 ```sh
 ./zig-out/bin/zigmq --protocol zigmv --metrics-port 9090
 curl -fsS http://127.0.0.1:9090/metrics
+curl -fsS http://127.0.0.1:9090/health
+curl -fsS http://127.0.0.1:9090/readyz
 ```
 
 The endpoint emits Prometheus text exposition with stable, low-cardinality names. It snapshots counters under the broker mutex and formats the response outside the publication and delivery loops; it does not add per-message metric allocations or client, subject, token, request-ID, or session-ID labels.
@@ -61,7 +63,7 @@ The initial metric contract is:
 
 Grafana can graph `rate(zigmv_published_total[5m])`, `rate(zigmv_delivered_total[5m])`, `zigmv_pending_durable`, and the delivery-to-publication ratio. Alerting should remain bounded-label: use queue pressure, retry growth, scrape failure, and process health rather than per-client or per-subject labels.
 
-The endpoint is intentionally unauthenticated in this first implementation and should be bound to loopback, a protected management network, or an authenticated reverse proxy. Do not expose it directly to an untrusted network.
+`/health` and `/readyz` currently return `ok` while the management listener is serving; graceful-drain and dependency-aware readiness are later beta gates. The endpoints are intentionally unauthenticated in this first implementation and should be bound to loopback, a protected management network, or an authenticated reverse proxy. Do not expose them directly to an untrusted network.
 
 ## What to add before 1.0.0-beta
 

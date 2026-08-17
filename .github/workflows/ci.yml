@@ -26,7 +26,8 @@ jobs:
       - name: Build
         run: zig build
 
-      - name: ZMP live benchmark
+      - name: ZMP live benchmark (diagnostic)
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail

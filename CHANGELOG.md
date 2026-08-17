@@ -2,6 +2,32 @@
 
 All notable changes to zigmq are documented here.
 
+## [0.5.0] - Unreleased
+
+### Added
+
+- Native ZigMV authentication using `ZMV/1 AUTH <token>` with bounded pre-auth command handling.
+- Comma-separated subject ACLs for native ZigMV publish and subscribe operations, using the canonical subject wildcard matcher.
+- Per-client publish rate limiting with explicit `rate_limited` protocol errors.
+- Server options for `--publish-allow`, `--subscribe-allow`, and `--publish-rate-limit`.
+- Integration coverage for authentication, ACL denial, allowed subjects, and rate limiting.
+- Native `scripts/benchmark_zigmv.py` target-rate stress harness with offered, accepted, delivered, loss, gap, duplicate, invalid-frame, and backpressure metrics.
+- Bounded producer backpressure in client mailboxes so a full queue blocks the publishing path rather than silently allowing unbounded growth or immediately dropping the delivery.
+
+### Performance notes
+
+- A 100,000,000 messages/sec offered-rate stress target was exercised on the development host. The test measured the actual host ceiling and exposed the difference between publisher acceptance and end-to-end delivery; it did not claim 100M messages/sec as achieved throughput.
+- A controlled 35,000 messages/sec acknowledged workload completed with zero loss, gaps, duplicates, or invalid frames in the local validation run; detailed commands and results are recorded in [`docs/ZIGMV_BENCHMARK_0.5.0.md`](docs/ZIGMV_BENCHMARK_0.5.0.md).
+
+### Documentation
+
+- README usage now reflects ZigMV naming, implemented delivery profiles, the 0.4.0 baseline, and the 0.5.0 security configuration.
+
+### Known limitations
+
+- Native TLS/mTLS, authenticated remote edge links, bounded offline transfer, reconnect backoff, and NATS/MQTT compatibility adapters remain pending for the complete 0.5.0 train.
+- ACL and rate-limit enforcement currently protects the native ZigMV path; legacy compatibility listeners remain separate migration surfaces.
+
 ## [0.4.0] - 2026-08-17
 
 ### Added

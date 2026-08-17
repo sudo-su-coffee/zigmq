@@ -146,6 +146,51 @@ def main() -> None:
             file_client.close()
             stop(file_process)
 
+    zigmv_process = start(
+        args.binary,
+        args.port + 4,
+        "--protocol",
+        "zigmv",
+        "--auth-token",
+        "secret",
+        "--publish-allow",
+        "telemetry.*",
+        "--subscribe-allow",
+        "telemetry.*",
+        "--publish-rate-limit",
+        "1",
+    )
+    zigmv_clients: list[LineSocket] = []
+    try:
+        unauthenticated_zigmv = LineSocket(socket.create_connection(("127.0.0.1", args.port + 4), timeout=2))
+        zigmv_clients.append(unauthenticated_zigmv)
+        assert unauthenticated_zigmv.line() == b"ZMV/1 READY auth=required"
+        unauthenticated_zigmv.sock.sendall(b"ZMV/1 PING\r\n")
+        assert unauthenticated_zigmv.line() == b"ZMV/1 ERR authentication_required"
+        unauthenticated_zigmv.close()
+
+        zigmv = LineSocket(socket.create_connection(("127.0.0.1", args.port + 4), timeout=2))
+        zigmv_clients.append(zigmv)
+        assert zigmv.line() == b"ZMV/1 READY auth=required"
+        zigmv.sock.sendall(b"ZMV/1 AUTH secret\r\n")
+        assert zigmv.line() == b"ZMV/1 OK AUTH"
+        zigmv.sock.sendall(b"ZMV/1 SUB live private.device\r\n")
+        assert zigmv.line() == b"ZMV/1 ERR subscribe_denied"
+        zigmv.sock.sendall(b"ZMV/1 SUB live telemetry.device\r\n")
+        assert zigmv.line() == b"ZMV/1 OK SUB"
+        zigmv.sock.sendall(b"ZMV/1 UNSUB live telemetry.device\r\n")
+        assert zigmv.line() == b"ZMV/1 OK UNSUB"
+        zigmv.sock.sendall(b"ZMV/1 PUB live 1 private.device 0\r\n\r\n")
+        assert zigmv.line() == b"ZMV/1 ERR publish_denied"
+        zigmv.sock.sendall(b"ZMV/1 PUB live 2 telemetry.device 0\r\n\r\n")
+        assert zigmv.line() == b"ZMV/1 OK PUB 2"
+        zigmv.sock.sendall(b"ZMV/1 PUB live 3 telemetry.device 0\r\n\r\n")
+        assert zigmv.line() == b"ZMV/1 ERR rate_limited"
+    finally:
+        for client in zigmv_clients:
+            client.close()
+        stop(zigmv_process)
+
     print("SECURITY_HARDENING_OK")
 
 

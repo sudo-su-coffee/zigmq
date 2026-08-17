@@ -126,6 +126,17 @@ def main(binary: str, port: int) -> None:
         state.settimeout(2)
         if not line(state_reader).startswith(b"ZMV/1 MSG state"):
             raise RuntimeError("state delivery failed")
+
+        publisher.sendall(b"ZMV/1 STATS\r\n")
+        stats = line(publisher_reader).decode("ascii").strip()
+        if not stats.startswith("ZMV/1 STATS "):
+            raise RuntimeError(f"stats response failed: {stats!r}")
+        fields = dict(item.split("=", 1) for item in stats.split()[2:])
+        for name in ("clients", "subscriptions", "pending", "published", "delivered", "redelivered", "acknowledged", "expired"):
+            if name not in fields or not fields[name].isdigit():
+                raise RuntimeError(f"invalid stats field {name}: {stats!r}")
+        if int(fields["redelivered"]) < 1 or int(fields["acknowledged"]) < 2:
+            raise RuntimeError(f"retry/ack stats were not recorded: {stats!r}")
         print("zigmv smoke test passed")
     finally:
         for sock, reader in sockets:

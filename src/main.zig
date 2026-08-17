@@ -1653,7 +1653,7 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
         const subscriptions = broker.zigmv_subscriptions.items.len;
         const pending = broker.durable_pending.count();
         broker.mutex.unlock();
-        client.sendFmt("{s} STATS clients={d} subscriptions={d} pending={d} published={d} delivered={d} redelivered={d} acknowledged={d} expired={d}\r\n", .{ expected_magic, clients, subscriptions, pending, stats.published, stats.delivered, stats.redelivered, stats.acknowledged, stats.expired }) catch return false;
+        client.sendFmt("{s} STATS clients={d} subscriptions={d} pending={d} published={d} delivered={d} redelivered={d} acknowledged={d} expired={d} rejected_clients={d} payload_bytes={d}\r\n", .{ expected_magic, clients, subscriptions, pending, stats.published, stats.delivered, stats.redelivered, stats.acknowledged, stats.expired, stats.rejected_clients, stats.payload_bytes }) catch return false;
         return true;
     }
     if (std.mem.eql(u8, operation, "SUB") or std.mem.eql(u8, operation, "UNSUB")) {

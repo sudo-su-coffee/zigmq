@@ -145,7 +145,7 @@ def main(binary: str, port: int) -> None:
         if not stats.startswith("ZMV/1 STATS "):
             raise RuntimeError(f"stats response failed: {stats!r}")
         fields = dict(item.split("=", 1) for item in stats.split()[2:])
-        for name in ("clients", "subscriptions", "pending", "published", "delivered", "redelivered", "acknowledged", "expired"):
+        for name in ("clients", "subscriptions", "pending", "published", "delivered", "redelivered", "acknowledged", "expired", "rejected_clients", "payload_bytes"):
             if name not in fields or not fields[name].isdigit():
                 raise RuntimeError(f"invalid stats field {name}: {stats!r}")
         if int(fields["redelivered"]) < 1 or int(fields["acknowledged"]) < 2:

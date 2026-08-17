@@ -71,6 +71,12 @@
 - [x] Add real TLS/mTLS listener configuration, certificate verification, and security regression tests.
 - [ ] Do not bump to 1.0.0 or publish artifacts until edge transport and TLS/mTLS gates pass.
 
+## Pull request and CI verification
+
+- [ ] Verify the candidate branch and working tree are ready for one batched PR.
+- [ ] Push the branch and create or update the PR with release-gate context.
+- [ ] Inspect all PR CI checks and record release/tag readiness.
+
 ## Full roadmap and beta audit
 
 - [ ] Audit all planned versions through 0.15.0 and the 1.0.0-beta gates against the current repository.

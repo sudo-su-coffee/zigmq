@@ -46,6 +46,26 @@ pub const Journal = struct {
         return &self.deliveries;
     }
 
+    /// Rewrite only currently pending deliveries into a caller-managed replacement file.
+    /// The caller must sync the replacement and atomically replace the old path.
+    pub fn compactInto(self: *Journal, target: std.fs.File) !void {
+        try target.seekTo(0);
+        try target.setEndPos(0);
+        var iterator = self.deliveries.iterator();
+        while (iterator.next()) |entry| {
+            const delivery = entry.value_ptr;
+            if (delivery.session_id.len > std.math.maxInt(u16) or delivery.subject.len > std.math.maxInt(u16) or delivery.payload.len > std.math.maxInt(u32)) return error.RecordTooLarge;
+            var header: [header_len]u8 = undefined;
+            makeHeader(&header, publish_kind, delivery.session_id, delivery.message_id, delivery.subject, delivery.payload, delivery.expires_at_ms);
+            setChecksum(&header, delivery.session_id, delivery.subject, delivery.payload);
+            try target.writeAll(&header);
+            try target.writeAll(delivery.session_id);
+            try target.writeAll(delivery.subject);
+            try target.writeAll(delivery.payload);
+        }
+        try target.sync();
+    }
+
     pub fn appendPublish(self: *Journal, session_id: []const u8, message_id: u64, subject: []const u8, payload: []const u8, expires_at_ms: u64) !void {
         if (session_id.len > std.math.maxInt(u16) or subject.len > std.math.maxInt(u16) or payload.len > std.math.maxInt(u32)) return error.RecordTooLarge;
         var header: [header_len]u8 = undefined;
@@ -202,6 +222,25 @@ test "journal recovers unacknowledged delivery and removes acknowledged delivery
     journal = try Journal.open(std.testing.allocator, file);
     defer journal.deinit();
     try std.testing.expectEqual(@as(usize, 0), journal.deliveries.count());
+}
+
+test "journal compacts away acknowledged records" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var file = try tmp.dir.createFile("sessions.zms", .{ .read = true, .truncate = true });
+    var journal = try Journal.open(std.testing.allocator, file);
+    try journal.appendPublish("device-7", 1, "device.command", "OPEN", 5000);
+    try journal.appendPublish("device-7", 2, "device.command", "CLOSE", 5000);
+    try journal.appendAck(1);
+    var compacted = try tmp.dir.createFile("sessions.compact.zms", .{ .read = true, .truncate = true });
+    defer compacted.close();
+    try journal.compactInto(compacted);
+    journal.deinit();
+    var recovered_file = try tmp.dir.openFile("sessions.compact.zms", .{ .mode = .read_write });
+    var recovered = try Journal.open(std.testing.allocator, recovered_file);
+    defer recovered.deinit();
+    try std.testing.expectEqual(@as(usize, 1), recovered.deliveries.count());
+    try std.testing.expect(recovered.deliveries.contains(2));
 }
 
 test "journal truncates an incomplete tail" {

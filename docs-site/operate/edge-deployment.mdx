@@ -73,3 +73,7 @@ Example remotely reachable launch with a token file:
 ```
 
 The broker remains a transport and delivery process rather than a database or inference runtime. AI applications should publish opaque telemetry, command, inference-request, and inference-result payloads through ZigMV; the consumer or worker decodes them and writes durable business data to its chosen database.
+
+## Durable journal compaction
+
+The persistent-session journal now exposes a compaction primitive that rewrites only currently pending deliveries into a caller-managed replacement file and syncs it before replacement. An edge supervisor should write the replacement beside the active journal, sync it, atomically rename it into place, and retain the old file until the replacement is verified. This keeps ACK tombstones from growing without requiring the broker to parse application payloads or hold the entire journal in memory.

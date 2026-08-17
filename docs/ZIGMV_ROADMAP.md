@@ -1,46 +1,67 @@
-# ZigMV release roadmap
+# ZigMV grouped release roadmap
 
-## Purpose
+## Release model
 
-ZigMV will be developed through small, testable minor releases. Each release must implement one coherent capability, document its guarantees, add regression and failure tests, and pass the repository CI before the next release begins. Version numbers are milestones, not promises that a feature is complete merely because its command parses.
+ZigMV will use **grouped release trains** rather than publishing a separate version for every small milestone. Related internal milestones will be implemented together, reviewed in one pull request, tested together, and published as one public release.
 
-The roadmap intentionally separates the fast NATS-like path from stronger MQTT-like device and delivery semantics while keeping one ZigMV envelope, one subject space, and one Adaptive Delivery and Transfer algorithm.
+The internal milestone numbers remain useful for planning, but they do not automatically become public tags. A release is created only when the entire capability bundle and all of its gates pass.
 
-## Release sequence
+> **One release train = one capability bundle, one primary implementation PR, one complete CI cycle, and one public release tag.**
 
-| Release | Main objective | Required tests and gates |
-| --- | --- | --- |
-| `0.3.0` | Stabilize `ZMV/1`, canonical envelopes, live delivery, no-ack telemetry, and work groups | Wire/parser tests, one-of-N tests, malformed-frame tests, bounded-queue tests, live benchmark baseline |
-| `0.4.0` | Add durable append, stream sequence, consumer cursors, ACK, retry, and replay | Restart recovery, ACK removal, retry deadline, expiry, partial-record recovery, replay tests |
-| `0.5.0` | Add retained state, last-value delivery, expiry, and persistent sessions | State replacement, TTL expiry, reconnect recovery, session limits, retained-size tests |
-| `0.6.0` | Add TLS/mTLS, identities, subject ACLs, rate limits, and credential rotation | Handshake failures, ACL matrix, certificate identity tests, brute-force and resource-limit tests |
-| `0.7.0` | Add authenticated edge links, export/import filters, reconnect, and bounded offline transfer | Link reconnect, cursor transfer, offline queue limits, duplicate link message tests |
-| `0.8.0` | Add NATS and MQTT 5.0 compatibility adapters at the boundary | Client interoperability, subject/topic translation, request/reply mapping, QoS mapping tests |
-| `0.9.0` | Add metrics, health/readiness, structured logs, admin inspection, and safe shutdown | Metric accuracy, secret redaction, readiness transitions, graceful drain, admin authorization |
-| `0.10.0` | Improve routing scale, event-loop behavior, batching, memory reuse, and resource isolation | p50/p95/p99 latency, fan-out, connection churn, memory-per-client, slow-consumer tests |
-| `0.11.0` | Add exact-delivery foundations: producer IDs, consumer IDs, deduplication windows, idempotent ACK | Duplicate publish, duplicate ACK, crash between append and ACK, dedup-window expiry |
-| `0.12.0` | Add cluster routing, replicated metadata, leader/follower stream foundations, and failover | Node loss, leader change, partition behavior, duplicate forwarding, recovery consistency |
-| `0.13.0` | Add protocol conformance, fuzzing, hostile-input hardening, and benchmark automation | Fuzz parser, frame limits, malformed lengths, long-running soak, reproducible benchmark artifacts |
-| `0.14.0` | Add production upgrades, migrations, configuration validation, compatibility policy, and operator tooling | Rolling upgrade, old-client compatibility, config errors, disk-full, restore and rollback tests |
-| `0.15.0` | Release candidate: freeze wire behavior, complete security review, stabilize performance, and close known defects | Full conformance matrix, failure injection, security checklist, performance SLOs, release-candidate review |
-| `1.0.0-beta.1` | Publish the first complete ZigMV beta with documented guarantees | All advertised profiles enabled only with passing evidence; signed artifacts, checksums, upgrade guide, and rollback procedure |
+If a train becomes too large to review safely, it may use preparatory commits or dependent PRs, but the final release remains blocked until the complete bundle is integrated and tested on `main`.
 
-## Profile gates
+## Grouped release trains
 
-The profiles are enabled in dependency order:
+| Public release | Internal milestones grouped together | Capability bundle | Release gate |
+| --- | --- | --- | --- |
+| `0.4.0` | Previous `0.3.x`, `0.4.x`, and `0.5.x` work | ZMV/1 foundation, live telemetry, work groups, durable append, consumer cursors, ACK/retry/replay, retained state, expiry, and persistent sessions | End-to-end profile matrix, restart recovery, queue/backpressure, replay, retention, and benchmark gates |
+| `0.5.0` | Previous `0.6.x`, `0.7.x`, and `0.8.x` work | TLS/mTLS, identities, subject ACLs, rate limits, authenticated edge links, reconnect/offline transfer, NATS/MQTT compatibility adapters, and migration tools | Security matrix, certificate tests, edge-link recovery, compatibility clients, and resource-limit tests |
+| `0.6.0` | Previous `0.9.x` and `0.10.x` work | Metrics, health/readiness, structured logs, administration, graceful shutdown, routing optimization, batching, event-loop improvements, memory reuse, and resource isolation | Observability accuracy, secret redaction, graceful drain, p99 latency, fan-out, connection churn, and memory gates |
+| `0.7.0` | Previous `0.11.x` and `0.12.x` work | Exact-delivery foundations, producer/consumer deduplication, crash recovery, cluster routing, replicated metadata, stream replication, and failover foundations | Duplicate publish/ACK tests, failure injection, node loss, leader changes, partition behavior, and recovery consistency |
+| `0.8.0` | Previous `0.13.x`, `0.14.x`, and `0.15.x` work | Protocol conformance, fuzzing, hostile-input hardening, production upgrades, migration tools, compatibility policy, performance freeze, and release-candidate stabilization | Full conformance matrix, fuzz/soak tests, security review, upgrade/rollback tests, SLO evidence, and known-defect closure |
+| `1.0.0-beta.1` | Final beta gate | Complete verified ZigMV beta with only the profiles whose guarantees are proven | Signed artifacts, checksums, upgrade guide, rollback procedure, security checklist, documented failure semantics, and release approval |
+
+## Execution order
+
+The implementation still proceeds in dependency order, even though public releases are grouped:
 
 ```text
-live -> work -> durable -> state -> exact
+ZMV/1 foundation
+    -> live
+    -> work
+    -> durable
+    -> state
+    -> security
+    -> edge transfer
+    -> compatibility
+    -> operations and scaling
+    -> exact delivery
+    -> clustering and failover
+    -> conformance and release hardening
+    -> 1.0.0-beta
 ```
 
-`live` is volatile at-most-once delivery for connected consumers. `work` selects one eligible member of a group. `durable` requires persistent records, consumer cursors, ACK, retry, expiry, and restart recovery. `state` requires retained last-value state and expiry. `exact` requires crash-safe producer and consumer deduplication; it must not be enabled because a message ID exists alone.
+The current `main` branch already contains the ZMV/1 foundation, `live`, and the first `work` path. The next public target is therefore **`0.4.0`**, which combines the remaining foundation train: durable append, consumer cursors, ACK, retry, replay, retained state, expiry, and persistent sessions.
 
-## Release policy
+## Public PR policy
 
-Each minor release must have a dedicated release note, migration note when wire behavior changes, benchmark record, and CI workflow result. A release tag must point to the exact commit that passed the release workflow. If a performance or reliability gate fails, the next release remains blocked while the issue is fixed or the target is revised using recorded measurements.
+For each grouped train, create one primary PR titled for the public release, such as `feat: prepare ZigMV 0.4.0`. The PR must contain the implementation, tests, benchmark updates, documentation, migration notes, and release notes for the entire bundle. CI must compile the release build, run unit and integration tests, execute the bounded benchmark suite, and verify that unsupported profiles fail explicitly.
 
-The 1.0.0-beta release is allowed only when the project can state, for every enabled profile, what happens on disconnect, process restart, duplicate publish, duplicate acknowledgement, expired message, full queue, full disk, and unavailable edge link. Unsupported behavior must produce an explicit protocol error rather than silent data loss.
+The PR may be updated repeatedly while bugs and performance issues are fixed. It must not be merged merely because an early subset works. The merge gate is the complete train, not the first passing commit.
 
-## Current position
+## Versioning policy
 
-The repository has the `ZMV/1` foundation, `live`, and the first `work` group path merged and CI-tested. The next implementation milestone is `0.4.0`: broker-integrated durable records, consumer cursors, ACK, retry, replay, and restart recovery. Until that milestone is complete, `durable`, `state`, and `exact` remain disabled.
+A grouped release increments the minor version when the complete bundle adds a coherent user-visible capability. Patch versions such as `0.4.1` and `0.4.2` are reserved for compatible bug fixes, security fixes, documentation corrections, and performance improvements that do not change the protocol contract.
+
+A beta release is not created just because the code compiles. The `1.0.0-beta.1` tag requires evidence for every advertised delivery profile, including behavior after disconnect, restart, duplicate publish, duplicate acknowledgement, expired message, full queue, full disk, and unavailable edge link. Unsupported behavior must produce an explicit protocol error rather than silent data loss.
+
+## Current status
+
+| Area | Status |
+| --- | --- |
+| Detailed roadmap grouped into public trains | Complete and documented |
+| ZMV/1 foundation | Merged and CI-tested |
+| `live` profile | Merged and CI-tested |
+| `work` profile | Merged and CI-tested |
+| Durable/state/exact broker profiles | Next implementation work in the `0.4.0` train |
+| 1.0.0-beta | Blocked until all grouped release gates pass |

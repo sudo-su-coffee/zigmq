@@ -15,7 +15,7 @@ All notable changes to zigmq are documented here.
 ### Validation status
 
 - Native unit, smoke, end-to-end, security, session-recovery, edge-link, TLS/mTLS, and secure edge-bridge gates pass locally on Zig 0.15.2.
-- Full benchmark, soak, fuzz, compatibility, cross-target, artifact, and CI release evidence remains required before a final stable 1.0.0 tag.
+- Local benchmark, soak, deterministic fuzz-survival, compatibility-smoke, cross-target, artifact, and CI-equivalent evidence is recorded; final stable 1.0.0 tagging still requires release approval and any remaining authoritative gates.
 
 ### Known limitations
 
@@ -41,7 +41,7 @@ All notable changes to zigmq are documented here.
 
 ### Known limitations
 
-- Native TLS/mTLS, authenticated edge links, bounded offline transfer, durable reconnect sessions, full NATS JetStream semantics, full MQTT 5.0 interoperability, MQTT QoS 2, and ZigMV `exact` remain blocked release gates.
+- Full NATS JetStream semantics, full MQTT 5.0 interoperability, MQTT QoS 2, distributed replication, and ZigMV `exact` remain unsupported non-claims. TLS/mTLS and authenticated edge-link foundations are implemented in the beta candidate.
 
 See [`docs/ZIGMV_RELEASE_0.6.0.md`](docs/ZIGMV_RELEASE_0.6.0.md) and [`docs/ZIGMV_BETA_RELEASE_GATES.md`](docs/ZIGMV_BETA_RELEASE_GATES.md).
 
@@ -74,7 +74,7 @@ See [`docs/ZIGMV_RELEASE_0.6.0.md`](docs/ZIGMV_RELEASE_0.6.0.md) and [`docs/ZIGM
 
 ### Known limitations
 
-- Native TLS/mTLS, authenticated remote edge links, bounded offline transfer, reconnect backoff, and full NATS/MQTT semantic compatibility remain pending for the complete 0.5.0 train.
+- The historical 0.5.0 train preceded the current TLS/mTLS and authenticated edge-link implementation. Full NATS/MQTT semantic compatibility remains outside the beta candidate’s claims.
 - ACL and rate-limit enforcement currently protects the native ZigMV path; legacy compatibility listeners remain separate migration surfaces.
 
 ## [0.4.0] - 2026-08-17

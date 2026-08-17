@@ -71,6 +71,13 @@
 - [x] Add real TLS/mTLS listener configuration, certificate verification, and security regression tests.
 - [ ] Do not bump to 1.0.0 or publish artifacts until edge transport and TLS/mTLS gates pass.
 
+## Final CI and codebase audit
+
+- [ ] Verify the corrected PR main test job and cross-target jobs.
+- [ ] Audit remaining protocol, security, compatibility, operations, benchmark, documentation, and release gaps.
+- [ ] Implement and test every concrete gap that is within the current scope.
+- [ ] Push one batched update and recheck CI before reporting readiness.
+
 ## Pull request and CI verification
 
 - [ ] Verify the candidate branch and working tree are ready for one batched PR.

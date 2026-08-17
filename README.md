@@ -35,7 +35,7 @@ ZigMV uses one protocol and one message model for backend services, sensors, gat
 | Cloud service events | Fast publish/subscribe and request/reply patterns |
 | IoT and edge devices | Small protocol, bounded resources, reconnect-friendly design |
 | Work distribution | Consumer-group profile planned in the same message model |
-| Durable messages | Optional local stream and planned ACK/retry state machine |
+| Durable messages | Optional local stream, ACKs, expiry, and bounded in-session redelivery |
 | Simple deployment | One small binary, no external runtime dependency |
 | Existing clients | Custom, NATS-compatible, and MQTT-compatible surfaces |
 | Product boundary | Messaging only; `zigkv` remains the Redis-compatible data store |
@@ -95,7 +95,7 @@ ZigMV uses one canonical subject space and explicit delivery profiles:
 | --- | --- | --- |
 | `live` | Implemented | Low-latency, volatile, at-most-once delivery |
 | `work` | Implemented | One-of-N consumer-group delivery |
-| `durable` | Implemented foundation | Delivery IDs, ACK removal, expiry, and local stream append |
+| `durable` | Implemented bounded foundation | Delivery IDs, ACKs, expiry, local stream append, and connected-session redelivery |
 | `state` | Implemented foundation | Retained last-value device state |
 | `exact` | Explicitly rejected | Reserved for proven deduplication and crash recovery |
 
@@ -154,7 +154,19 @@ The existing listeners are useful when integrating current applications:
 | MQTT-compatible | `zig build run -- --protocol mqtt --port 1883` | MQTT device and gateway clients |
 | ZigMV | `zig build run -- --protocol zigmv` | New unified cloud/IoT/edge clients |
 
-The compatibility listeners are intentionally smaller than full NATS or MQTT 5.0 implementations. ZigMV is the native protocol direction; compatibility support is maintained separately so it does not make the core message path unnecessarily complex.
+The compatibility listeners are intentionally smaller than full NATS or MQTT 5.0 implementations. ZigMV is the native protocol direction; compatibility support is maintained separately so it does not make the core message path unnecessarily complex. ZigMV `live` is comparable to Core NATS or MQTT QoS 0. ZigMV `durable` currently provides ACK-tracked connected-session redelivery, similar in intent to an at-least-once path, but it is not full MQTT QoS 1 or NATS JetStream interoperability because durable client identity, reconnect resume, and persistent consumer cursors are not complete. MQTT QoS 2 and ZigMV `exact` are not implemented.
+
+## Where ZigMV fits
+
+ZigMV is useful when one deployment spans constrained devices, a local gateway, and cloud services, and the application needs to choose delivery behavior per message instead of adopting separate broker products. Use `live` for high-rate sensor telemetry where the newest reading matters more than replaying every sample; use `work` for commands or jobs that should be handled by one worker; use `durable` for important connected-session commands that must be acknowledged and retried; and use `state` for retained device status or configuration snapshots. `zigkv` remains the Redis-compatible key-value system, while ZigMV remains the messaging system.
+
+ZigMV is different from NATS and MQTT rather than being a drop-in replacement. It takes NATS-like subjects, request/reply, and work sharing, then combines them with MQTT-like retained state, expiry, constrained-device orientation, and explicit delivery profiles. It uses one canonical ZigMV envelope and one routing core, so compatibility adapters are boundaries rather than separate hot-path brokers. The current implementation does not claim the full NATS JetStream feature set or MQTT 5.0 QoS 2; those require additional conformance and crash-recovery work.
+
+### Edge-to-cloud flow
+
+![ZigMV edge architecture](docs/ZIGMV_EDGE_ARCHITECTURE.png)
+
+The local broker keeps volatile traffic close to devices, applies ACLs and bounded mailboxes, stores only configured durable/state data, and forwards selected subjects through a future authenticated edge link. The edge link design includes reconnect backoff, cursor transfer, bounded offline queues, lag, retry, and drop metrics, but native TLS/mTLS and remote offline transfer remain release gates rather than current guarantees.
 
 ## Custom protocol example
 
@@ -227,6 +239,25 @@ python3 scripts/benchmark_zigmv.py --duration 10 --target-mps 35000 --payload-si
 
 Use `--ack-publishes` when you want the acknowledged comparison. Run the matrix with payload sizes of 16, 128, and 1,024 bytes and subscriber counts of 1, 10, and 50. Record the commit, Zig version, optimization mode, CPU, memory, operating system, publish mode, publish rate, delivery rate, and latency. Benchmark numbers are machine-specific and are not performance guarantees.
 
+### Recorded benchmark evidence
+
+The following values are real local benchmark artifacts stored under [`benchmark_runs/`](benchmark_runs/) and consolidated in [`docs/ZIGMV_BETA_RELEASE_GATES.md`](docs/ZIGMV_BETA_RELEASE_GATES.md). They are evidence for comparison and regression tracking, not universal capacity guarantees.
+
+| Workload | Recorded result |
+| --- | ---: |
+| Publish ACK capacity | **23,563.4 msg/s** |
+| 50-subscriber fan-out source rate | **1,781.3 msg/s** |
+| 50-subscriber fan-out deliveries | **89,066.7 deliveries/s** |
+| Volatile publish ACK without stream | **36,618.7 msg/s** |
+| Publish ACK with local stream | **6,294.2 msg/s** |
+| Stream relative rate | **17.2%** of the no-stream rate |
+| Realtime telemetry | **20,424.8 msg/s** |
+| Realtime alert burst | **18,253.4 events/s** |
+| Realtime command-control | **2,731.1 commands/s** |
+| Realtime consumer group | **882.4 msg/s** with three members |
+
+The explicit 100M messages/sec run is an offered-rate stress target, not an achieved end-to-end guarantee. A valid lossless result must separately show accepted, delivered, and acknowledged counts with zero gaps, duplicates, invalid frames, and unexplained expiry.
+
 ## Try ZigMV
 
 Start the native unified protocol listener:
@@ -257,7 +288,7 @@ The `0.4.0` ZigMV train enables `live`, `work`, `durable`, and `state`. `exact` 
 
 The next protocol generation is **ZigMV**: one lightweight message protocol and one Adaptive Delivery and Transfer algorithm for cloud services, IoT devices, and edge gateways. It combines NATS-like low-latency subjects, request/reply, and work sharing with MQTT-like device sessions, retained state, expiry, and stronger delivery profiles. It is a new protocol, not two protocol implementations joined by a bridge.
 
-The `0.4.0` release combines the ZMV/1 foundation, `live`, `work`, durable delivery, ACK handling, durable stream append, retained state, expiry metadata, and the first persistent delivery state. Later trains will add security/edge compatibility, operations/scaling, exact delivery/clustering, and final hardening before `1.0.0-beta`.
+The `0.4.0` release combines the ZMV/1 foundation, `live`, `work`, durable delivery, ACK handling, durable stream append, retained state, expiry metadata, and the first persistent delivery state. The current follow-up work adds bounded in-session durable redelivery and stronger benchmark integrity accounting. Later trains must still add durable client identity and reconnect resume, native TLS/mTLS, authenticated edge transfer, full adapter conformance, exact-delivery deduplication, clustering, and final hardening before `1.0.0-beta`.
 
 The project boundaries remain intentional. `zigkv` owns Redis-compatible data structures; `nammapush-rs` owns notification delivery and provider fallback; zigmq/ZigMV owns transport, routing, delivery state, and edge messaging.
 
@@ -271,7 +302,10 @@ Read the design first: [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md).
 | [`docs/ZIGMV_PROTOCOL.md`](docs/ZIGMV_PROTOCOL.md) | ZigMV protocol, ADT algorithm, transfer model, and release gates |
 | [`docs/ZIGMV_COMPARISON_FINDINGS.md`](docs/ZIGMV_COMPARISON_FINDINGS.md) | NATS and MQTT capability comparison and ZigMV implications |
 | [`docs/ZIGMV_BENCHMARK_0.5.0.md`](docs/ZIGMV_BENCHMARK_0.5.0.md) | Reproducible 0.5.0 benchmark and validation evidence |
+| [`docs/ZIGMV_EDGE_ARCHITECTURE.mmd`](docs/ZIGMV_EDGE_ARCHITECTURE.mmd) | Source flow diagram for device, edge, cloud, and compatibility paths |
+| [`docs/ZIGMV_EDGE_ARCHITECTURE.png`](docs/ZIGMV_EDGE_ARCHITECTURE.png) | Rendered edge architecture diagram |
 | [`docs/ZIGMV_RELEASE_PLAN.md`](docs/ZIGMV_RELEASE_PLAN.md) | ZigMV release gates and delivery-guarantee boundaries |
+| [`docs/ZIGMV_BETA_RELEASE_GATES.md`](docs/ZIGMV_BETA_RELEASE_GATES.md) | Complete 0.5.0-to-1.0.0-beta implementation, benchmark, and release checklist |
 | [`docs/ZIGMV_ROADMAP.md`](docs/ZIGMV_ROADMAP.md) | Grouped release trains from 0.4.0 to 1.0.0-beta |
 | [`docs/RELEASE_0.4.0.md`](docs/RELEASE_0.4.0.md) | Grouped 0.4.0 ZigMV release notes and guarantees |
 | [`CHANGELOG.md`](CHANGELOG.md) | Version history |

@@ -101,6 +101,25 @@ def main(binary: str, port: int) -> None:
         if not line(durable_reader).startswith(b"ZMV/1 OK ACK"):
             raise RuntimeError("durable acknowledgement failed")
 
+        publisher.sendall(b"ZMV/1 PUB durable 4 jobs 5\r\nhello\r\n")
+        if line(publisher_reader) != b"ZMV/1 OK PUB 4\r\n":
+            raise RuntimeError("retry publish acknowledgement failed")
+        first_retry = line(durable_reader)
+        if not first_retry.startswith(b"ZMV/1 MSG durable "):
+            raise RuntimeError(f"initial retry delivery failed: {first_retry!r}")
+        retry_id = first_retry.split()[3]
+        if exact(durable_reader, 7) != b"hello\r\n":
+            raise RuntimeError("initial retry payload framing failed")
+        durable.settimeout(3)
+        second_retry = line(durable_reader)
+        if not second_retry.startswith(b"ZMV/1 MSG durable ") or second_retry.split()[3] != retry_id:
+            raise RuntimeError(f"durable redelivery failed: {second_retry!r}")
+        if exact(durable_reader, 7) != b"hello\r\n":
+            raise RuntimeError("redelivery payload framing failed")
+        durable.sendall(b"ZMV/1 ACK " + retry_id + b"\r\n")
+        if not line(durable_reader).startswith(b"ZMV/1 OK ACK"):
+            raise RuntimeError("redelivery acknowledgement failed")
+
         publisher.sendall(b"ZMV/1 PUB state 3 device.status 4\r\nokay\r\n")
         if line(publisher_reader) != b"ZMV/1 OK PUB 3\r\n":
             raise RuntimeError("state publish acknowledgement failed")

@@ -378,6 +378,7 @@ const Broker = struct {
     fn disconnect(self: *Broker, client: *Client) void {
         self.mutex.lock();
         defer self.mutex.unlock();
+        self.removeDurableForClientLocked(client);
         self.removeClientLocked(client);
         var iterator = client.subscriptions.iterator();
         while (iterator.next()) |entry| {
@@ -411,6 +412,52 @@ const Broker = struct {
             } else {
                 zigmv_index += 1;
             }
+        }
+    }
+
+    fn removeDurableForClientLocked(self: *Broker, client: *Client) void {
+        var iterator = self.durable_pending.iterator();
+        var remove_ids: std.ArrayList(u64) = .empty;
+        defer remove_ids.deinit(self.allocator);
+        while (iterator.next()) |entry| {
+            if (entry.value_ptr.client == client) remove_ids.append(self.allocator, entry.key_ptr.*) catch break;
+        }
+        for (remove_ids.items) |message_id| {
+            if (self.durable_pending.fetchRemove(message_id)) |removed| {
+                self.allocator.free(removed.value.topic);
+                self.allocator.free(removed.value.payload);
+            }
+        }
+    }
+
+    fn retryDurable(self: *Broker) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const now_ms = @as(u64, @intCast(std.time.milliTimestamp()));
+        var due_ids: std.ArrayList(u64) = .empty;
+        defer due_ids.deinit(self.allocator);
+        var iterator = self.durable_pending.iterator();
+        while (iterator.next()) |entry| {
+            if (entry.value_ptr.expires_at_ms <= now_ms or entry.value_ptr.retry_at_ms <= now_ms) {
+                due_ids.append(self.allocator, entry.key_ptr.*) catch return;
+            }
+        }
+        for (due_ids.items) |message_id| {
+            const pending = self.durable_pending.getPtr(message_id) orelse continue;
+            if (pending.expires_at_ms <= now_ms) {
+                if (self.durable_pending.fetchRemove(message_id)) |removed| {
+                    self.allocator.free(removed.value.topic);
+                    self.allocator.free(removed.value.payload);
+                }
+                continue;
+            }
+            pending.attempts +%= 1;
+            const shift: u6 = @intCast(@min(pending.attempts, 5));
+            const delay_ms = @min(@as(u64, 30_000), @as(u64, 1_000) << shift);
+            pending.retry_at_ms = now_ms + delay_ms;
+            pending.client.sendZmpMessage("durable", message_id, pending.topic, pending.payload) catch |err| {
+                std.log.debug("durable retry failed: {s}", .{@errorName(err)});
+            };
         }
     }
 
@@ -1707,6 +1754,7 @@ pub fn main() !void {
 
     std.debug.print("zigmq listening on {s}:{d} protocol={s}\n", .{ host, port, @tagName(protocol) });
     while (!stop_requested.load(.seq_cst)) {
+        broker.retryDurable();
         const connection = server.accept() catch |err| {
             if (stop_requested.load(.seq_cst)) break;
             if (err == error.WouldBlock or err == error.Interrupted) {

@@ -14,7 +14,7 @@ If a train becomes too large to review safely, it may use preparatory commits or
 
 | Public release | Internal milestones grouped together | Capability bundle | Release gate |
 | --- | --- | --- | --- |
-| `0.4.0` | Previous `0.3.x`, `0.4.x`, and `0.5.x` work | ZMV/1 foundation, live telemetry, work groups, durable append, consumer cursors, ACK/retry/replay, retained state, expiry, and persistent sessions | End-to-end profile matrix, restart recovery, queue/backpressure, replay, retention, and benchmark gates |
+| `0.4.0` | Previous `0.3.x`, `0.4.x`, and `0.5.x` work | ZMV/1 foundation, live telemetry, work groups, durable append, delivery IDs, ACK handling, bounded connected-session retry, retained state, and expiry | End-to-end profile matrix, restart recovery, queue/backpressure, replay, retention, and benchmark gates |
 | `0.5.0` | Previous `0.6.x`, `0.7.x`, and `0.8.x` work | TLS/mTLS, identities, subject ACLs, rate limits, authenticated edge links, reconnect/offline transfer, NATS/MQTT compatibility adapters, and migration tools | Security matrix, certificate tests, edge-link recovery, compatibility clients, and resource-limit tests |
 | `0.6.0` | Previous `0.9.x` and `0.10.x` work | Metrics, health/readiness, structured logs, administration, graceful shutdown, routing optimization, batching, event-loop improvements, memory reuse, and resource isolation | Observability accuracy, secret redaction, graceful drain, p99 latency, fan-out, connection churn, and memory gates |
 | `0.7.0` | Previous `0.11.x` and `0.12.x` work | Exact-delivery foundations, producer/consumer deduplication, crash recovery, cluster routing, replicated metadata, stream replication, and failover foundations | Duplicate publish/ACK tests, failure injection, node loss, leader changes, partition behavior, and recovery consistency |
@@ -41,7 +41,7 @@ ZMV/1 foundation
     -> 1.0.0-beta
 ```
 
-The current release baseline is **`0.4.0`**, containing the ZMV/1 foundation, `live`, `work`, durable append, delivery IDs, ACK handling, retained state, and expiry behavior. The active public target is **`0.5.0`**, which is being implemented as one security and edge-transfer train rather than a sequence of small tags.
+The current release baseline is **`0.4.0`**, containing the ZMV/1 foundation, `live`, `work`, durable append, delivery IDs, ACK handling, retained state, expiry behavior, and bounded connected-session retry. The active public target is **`0.5.0`**, which is being implemented as one security, durability, benchmark, and edge-transfer train rather than a sequence of small tags. The complete gate checklist is [`ZIGMV_BETA_RELEASE_GATES.md`](ZIGMV_BETA_RELEASE_GATES.md).
 
 ## Public PR policy
 
@@ -63,7 +63,7 @@ A beta release is not created just because the code compiles. The `1.0.0-beta.1`
 | ZMV/1 foundation | Merged and CI-tested |
 | `live` profile | Merged and CI-tested |
 | `work` profile | Merged and CI-tested |
-| Durable/state broker profiles | Implemented foundation in `0.4.0`; retry/recovery guarantees remain bounded |
+| Durable/state broker profiles | Implemented foundation in `0.4.0`; connected-session retry is tested, while restart and reconnect recovery remain open |
 | `0.5.0` authentication and resource security | Partially implemented: native ZigMV AUTH, subject ACLs, subscription limits, and per-client publish rate limits |
-| `0.5.0` edge transfer and compatibility | Pending: TLS/mTLS, authenticated edge links, reconnect/offline transfer, and NATS/MQTT adapters |
+| `0.5.0` edge transfer and compatibility | Pending: TLS/mTLS, authenticated edge links, reconnect/offline transfer, and full NATS/MQTT semantic adapters |
 | 1.0.0-beta | Blocked until all grouped release gates pass |

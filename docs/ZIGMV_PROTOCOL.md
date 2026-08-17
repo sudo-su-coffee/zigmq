@@ -70,11 +70,11 @@ site.factory.line1.robot.command
 | --- | --- | --- | --- |
 | `live` | Volatile at-most-once to connected consumers | Telemetry and low-latency events | Bounded memory mailbox |
 | `work` | One eligible consumer per group | Jobs, commands, service workers | Group cursor and ownership |
-| `durable` | At-least-once with ACK, retry, expiry, and replay | Important commands and notifications | Append log and consumer cursor |
+| `durable` | ACK-tracked delivery with bounded in-session redelivery, expiry, and local replay; disconnect persistence is not yet enabled | Important commands and notifications | Append log, pending delivery map, and retry timer |
 | `state` | Last-value retained state with expiry | Device status and edge state | Subject state index and TTL |
 | `exact` | Deduplicated durable delivery | Only after crash guarantees are proven | Durable producer and consumer deduplication |
 
-A server must reject a profile that is not implemented. A publisher acknowledgement only confirms acceptance by the broker; it must never be described as consumer acknowledgement.
+A server must reject a profile that is not implemented. A publisher acknowledgement only confirms acceptance by the broker; it must never be described as consumer acknowledgement. The current durable retry loop redelivers unacknowledged messages while the original client session remains connected; pending entries are discarded on disconnect until durable client identity and session resume are implemented.
 
 ## Wire format
 
@@ -143,11 +143,13 @@ ZigMV separates transport encryption, authentication, authorization, and resourc
 
 NATS and MQTT 5.0 compatibility are optional boundary adapters. They are not separate internal brokers and must translate into the canonical envelope before routing. New applications that control both ends should use ZigMV directly. Existing devices and services can migrate through adapters without forcing the ADT core to duplicate routing or storage logic.
 
+ZigMV `live` is intentionally comparable to Core NATS or MQTT QoS 0. ZigMV `durable` is currently a bounded, connected-session analogue of an MQTT QoS 1 or JetStream-style acknowledged consumer, but it is not full MQTT QoS 1 interoperability because reconnect sessions and durable consumer cursors are incomplete. MQTT QoS 2 and ZigMV `exact` are not implemented: the required PUBREC/PUBREL/PUBCOMP or equivalent deduplication, crash recovery, and duplicate-suppression state machine is still a later release gate.
+
 ## Release boundaries
 
 ### 0.4.0
 
-The grouped 0.4.0 implementation release stabilizes the ZigMV name and `ZMV/1` handshake, implements `live`, `work`, `durable`, and `state`, adds native end-to-end tests, ACK handling, durable stream append, retained-state delivery, expiry checks, and restart-oriented coverage. `exact` remains explicitly rejected until deduplication and crash guarantees are complete.
+The grouped 0.4.0 implementation release stabilizes the ZigMV name and `ZMV/1` handshake, implements `live`, `work`, `durable`, and `state`, adds native end-to-end tests, ACK handling, durable stream append, retained-state delivery, expiry checks, and bounded in-session durable redelivery. `exact` remains explicitly rejected until deduplication, durable client identity, reconnect resume, and crash guarantees are complete.
 
 ### 1.0.0-beta
 

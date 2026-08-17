@@ -8,6 +8,8 @@ pub const Item = struct {
     payload: []u8,
 };
 
+pub const SequenceResult = enum { accepted, duplicate, gap };
+
 pub const Forwarder = struct {
     allocator: Allocator,
     export_filter: []const u8,
@@ -17,6 +19,7 @@ pub const Forwarder = struct {
     queued_bytes: usize = 0,
     next_sequence: u64 = 1,
     failures: u32 = 0,
+    last_received_sequence: u64 = 0,
 
     pub fn init(allocator: Allocator, export_filter: []const u8, max_items: usize, max_bytes: usize) Forwarder {
         return .{
@@ -70,7 +73,24 @@ pub const Forwarder = struct {
     pub fn recordSuccess(self: *Forwarder) void {
         self.failures = 0;
     }
+
+    pub fn acceptSequence(self: *Forwarder, sequence: u64) SequenceResult {
+        if (sequence <= self.last_received_sequence) return .duplicate;
+        const result: SequenceResult = if (self.last_received_sequence != 0 and sequence != self.last_received_sequence + 1) .gap else .accepted;
+        self.last_received_sequence = sequence;
+        return result;
+    }
 };
+
+pub fn encodeLinkFrame(sequence: u64, profile: []const u8, subject: []const u8, payload: []const u8, output: []u8) ![]const u8 {
+    if (profile.len == 0 or subject.len == 0 or payload.len > std.math.maxInt(u32)) return error.InvalidFrame;
+    const header = try std.fmt.bufPrint(output, "ZMV/1 LINK {d} {s} {s} {d}\r\n", .{ sequence, profile, subject, payload.len });
+    const total = header.len + payload.len + 2;
+    if (total > output.len) return error.BufferTooSmall;
+    @memcpy(output[header.len .. header.len + payload.len], payload);
+    @memcpy(output[header.len + payload.len .. total], &[_]u8{ '\r', '\n' });
+    return output[0..total];
+}
 
 fn subjectMatches(filter: []const u8, subject: []const u8) bool {
     var filter_start: usize = 0;
@@ -105,4 +125,15 @@ test "edge forwarder filters, bounds, sequences, and frees dequeued items" {
     try std.testing.expectEqual(@as(u64, 500), forwarder.recordFailure());
     forwarder.recordSuccess();
     try std.testing.expectEqual(@as(u64, 250), forwarder.recordFailure());
+    try std.testing.expectEqual(SequenceResult.accepted, forwarder.acceptSequence(1));
+    try std.testing.expectEqual(SequenceResult.duplicate, forwarder.acceptSequence(1));
+    try std.testing.expectEqual(SequenceResult.gap, forwarder.acceptSequence(3));
+}
+
+test "encodes binary-safe edge link frames" {
+    var output: [128]u8 = undefined;
+    const frame = try encodeLinkFrame(7, "durable", "edge.commands", "A\x00B", &output);
+    try std.testing.expect(std.mem.startsWith(u8, frame, "ZMV/1 LINK 7 durable edge.commands 3\r\n"));
+    try std.testing.expectEqual(@as(u8, 0), frame[frame.len - 3]);
+    try std.testing.expectEqualStrings("\r\n", frame[frame.len - 2 ..]);
 }

@@ -46,12 +46,13 @@ def read_zmp_message(reader: object) -> bytes:
     return bytes(payload[:-2])
 
 
-def subscribe_worker(host: str, port: int, subject: str, expected: int, result: list, index: int) -> None:
+def subscribe_worker(host: str, port: int, subject: str, expected: int, result: list, ready: list, index: int) -> None:
     sock, reader = connect(host, port)
     try:
         sock.sendall(f"ZMP/1 SUB live {subject}\r\n".encode())
         if not read_line(reader).startswith(b"ZMP/1 OK SUB"):
             raise RuntimeError("subscription failed")
+        ready[index] = True
         count = 0
         while count < expected:
             read_zmp_message(reader)
@@ -66,10 +67,15 @@ def benchmark(host: str, port: int, messages: int, subscribers: int, payload_siz
     subject = "bench.zmp"
     payload = b"x" * payload_size
     received = [0] * subscribers
-    workers = [threading.Thread(target=subscribe_worker, args=(host, port, subject, messages, received, i)) for i in range(subscribers)]
+    ready = [False] * subscribers
+    workers = [threading.Thread(target=subscribe_worker, args=(host, port, subject, messages, received, ready, i)) for i in range(subscribers)]
     for worker in workers:
         worker.start()
-    time.sleep(0.1)
+    deadline = time.monotonic() + 10
+    while not all(ready):
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"subscription setup incomplete: {ready}")
+        time.sleep(0.01)
 
     publisher, publisher_reader = connect(host, port)
     try:

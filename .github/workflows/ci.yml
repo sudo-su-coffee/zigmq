@@ -26,6 +26,19 @@ jobs:
       - name: Build
         run: zig build
 
+      - name: ZMP live benchmark (diagnostic)
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./zig-out/bin/zigmq --protocol zmp --host 127.0.0.1 --port 4222 >/tmp/zigmq-zmp-ci.log 2>&1 &
+          broker_pid=$!
+          trap 'status=$?; echo "--- zigmq broker log ---"; cat /tmp/zigmq-zmp-ci.log || true; kill "$broker_pid" 2>/dev/null || true; exit "$status"' EXIT
+          sleep 1
+          python3 scripts/benchmark_zmp.py --port 4222 --messages 16 --subscribers 1 --payload-size 128 --pipeline 1 --ack-publishes
+          python3 scripts/benchmark_zmp.py --port 4222 --messages 16 --subscribers 1 --payload-size 128 --pipeline 1
+          python3 scripts/benchmark_zmp.py --port 4222 --messages 16 --subscribers 10 --payload-size 128 --pipeline 1
+
       - name: End-to-end tests
         run: python3 scripts/e2e_test.py --binary ./zig-out/bin/zigmq
 

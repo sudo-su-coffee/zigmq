@@ -4,7 +4,7 @@ const posix = std.posix;
 const zigmq = @import("zigmq");
 const cli = @import("cli.zig");
 const zmp = @import("zmp.zig");
-const persist = @import("zigmv_persist.zig");
+const persist = zigmq.zigmv_persist;
 
 const Allocator = std.mem.Allocator;
 const Protocol = enum { custom, nats, mqtt, zmp, zigmv };

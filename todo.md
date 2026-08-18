@@ -71,6 +71,19 @@
 - [x] Add real TLS/mTLS listener configuration, certificate verification, and security regression tests.
 - [ ] Do not bump to 1.0.0 or publish artifacts until edge transport and TLS/mTLS gates pass.
 
+## Complete v1.0.0 release work
+
+- [ ] Audit all code, branches, PRs, release gates, metadata, and artifacts.
+- [ ] Complete protocol, transport, edge-link, storage, resource-limit, and security implementation checks.
+- [ ] Complete unit, integration, compatibility, hostile-input, fuzz-survival, recovery, TLS/mTLS, and fault tests.
+- [ ] Complete benchmark, latency, memory, backpressure, fan-out, reconnect, and one-hour soak evidence.
+- [ ] Decide and document every stable claim and unsupported feature.
+- [ ] Synchronize README, changelog, protocol, operations, docs site, release notes, and known limitations.
+- [ ] Run documentation, stale-claim, metadata, checksum, reproducibility, and diff checks.
+- [ ] Build and verify final multi-target artifacts from one exact commit.
+- [ ] Run and inspect final CI before merging the release candidate.
+- [ ] Merge release PRs, obtain approval, create v1.0.0, and verify tag/release/artifact alignment.
+
 ## Stacked PR release execution
 
 - [ ] Preserve the merged main baseline and record the current working-tree changes.

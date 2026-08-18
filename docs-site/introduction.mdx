@@ -1,0 +1,35 @@
+---
+title: Introduction
+description: The ZigMV message model and why it exists.
+---
+
+# Introduction
+
+## The problem
+
+Cloud services, devices, and edge gateways often split messaging across multiple systems. MQTT is efficient and familiar for devices, while NATS is effective for low-latency service routing and request/reply. Operating both can create duplicated credentials, routing policies, monitoring, storage, and client libraries.
+
+ZigMV defines one native protocol with explicit delivery profiles so an application can select the required behavior per message. The same broker can handle replaceable telemetry, work queues, retained state, and acknowledged connected-session commands without forcing every workload into one delivery policy.
+
+## The canonical envelope
+
+A ZigMV message carries a subject, payload, delivery profile, message ID, optional reply subject, expiry, and delivery metadata. Compatibility adapters translate NATS or MQTT traffic into this envelope at the boundary. The routing core does not maintain separate internal NATS and MQTT brokers.
+
+## Why edge systems need profiles
+
+An edge gateway should not treat a temperature sample, a machine command, and the latest device configuration as the same kind of message:
+
+| Data | Recommended profile | Why |
+| --- | --- | --- |
+| Replaceable sensor sample | `live` | Lowest overhead; loss during overload is acceptable when the next sample supersedes it. |
+| Work order | `work` | Exactly one worker in a group should process it. |
+| Important connected command | `durable` | The consumer must ACK; the broker retries while the session remains connected. |
+| Current device state | `state` | A late subscriber should receive the latest value rather than the full history. |
+
+## Comparison in one sentence
+
+ZigMV is **MQTT-oriented at the device boundary and NATS-oriented in the service core**, but it is a new wire protocol with its own guarantee boundaries.
+
+<Note>
+Compatibility requires adapters. An MQTT 5.0 or NATS client cannot speak native `ZMV/1` without a compatibility boundary.
+</Note>

@@ -8,16 +8,18 @@ This document defines the evidence required before each ZigMV grouped release tr
 
 The current branch contains the merged 0.5.0 security and benchmark train plus a follow-up durable redelivery change. The native ZigMV path has authentication, subject ACLs, per-client publish rate limiting, bounded client mailboxes, live/work/durable/state profiles, local stream append, ACK handling, retained state, benchmark integrity counters, and connected-session durable redelivery with bounded exponential backoff.
 
-The following are **not yet release claims**: MQTT 5.0 QoS 2, ZigMV `exact`, durable reconnect sessions, durable consumer cursors across restart, authenticated remote edge transfer, native TLS/mTLS, full NATS JetStream semantics, and full MQTT 5.0 interoperability.
+The following are **not yet release claims**: MQTT 5.0 QoS 2, ZigMV `exact`, distributed durable replication, authenticated remote edge transfer, native TLS/mTLS, full NATS JetStream semantics, and full MQTT 5.0 interoperability. Opt-in durable reconnect sessions and the local Prometheus endpoint are implemented and tested, but they are not yet a complete distributed beta guarantee.
 
 ## Grouped release trains
 
 | Train | Primary implementation | Required evidence | Current state |
 | --- | --- | --- | --- |
 | `0.5.0` | Authentication, identities, ACLs, limits, connected-session durable retry, benchmark integrity | Auth/ACL/rate tests, retry test, bounded-queue test, release build, benchmark evidence | Foundation implemented; TLS, edge links, and full adapters remain open |
-| `0.6.0` | Operations and hot-path performance | Metrics accuracy, health/readiness, graceful drain, routing index, batching, p99 latency, connection churn, memory gates | Planned |
-| `0.7.0` | Exact-delivery and failure foundations | Producer/consumer deduplication, crash injection, duplicate ACK/publish, restart consistency | Planned; `exact` stays rejected |
-| `0.8.0` | Protocol conformance and hardening | Fuzzing, hostile input, upgrade/rollback, adapter conformance, soak tests, security review | Planned |
+| `0.6.0` | Operations and hot-path performance | Native STATS, Prometheus exposition, benchmark integrity, release build, connection and memory gates | Implemented baseline; health/readiness, latency histograms, and routing-index work remain open |
+| `0.7.0` | Persistent durable sessions and crash-safe recovery | Checksummed journal, incomplete-tail recovery, ACK replay, reconnect session rebind, broker-restart test | Implemented for opt-in local session store; distributed replication and `exact` remain rejected |
+| `0.8.0` | Edge forwarding and reconnect foundations | Export filters, bounded queue, sequence tracking, reconnect backoff, authenticated transport, cursor transfer | Queue/filter/backoff foundation implemented and tested; remote link/TLS integration remains open |
+| `0.9.0` | Performance and protocol hardening | Routing-index benchmark, compiled client, fuzzing, soak, memory/CPU budgets | Planned |
+| `0.10.0` | Compatibility completion | MQTT/NATS semantic conformance and negative guarantees | Planned |
 | `1.0.0-beta.1` | Verified beta release | Signed artifacts, checksums, complete advertised-profile matrix, failure semantics, upgrade guide, rollback procedure | Blocked until all selected guarantees pass |
 
 ## Delivery correctness matrix

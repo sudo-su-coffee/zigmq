@@ -86,7 +86,9 @@ fn runPub(allocator: Allocator, args: []const []const u8) !void {
 
     const connection = try connect(allocator, config);
     defer connection.deinit();
-    try connection.sendLine("PUB {s} ", .{subject});
+    var header: [512]u8 = undefined;
+    const header_bytes = try std.fmt.bufPrint(&header, "PUB {s} ", .{subject});
+    try connection.sendBytes(header_bytes);
     try connection.sendBytes(payload);
     try connection.sendBytes("\r\n");
     const response = try connection.readLine() orelse return error.EndOfStream;

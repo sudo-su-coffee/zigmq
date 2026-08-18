@@ -1,0 +1,27 @@
+---
+title: MQTT 5.0 adapter
+description: Map MQTT clients and semantics into ZigMV without overstating QoS compatibility.
+---
+
+# MQTT 5.0 adapter
+
+The MQTT adapter is intended for device fleets that already speak MQTT 5.0. It maps MQTT topic names to ZigMV subjects and preserves application properties and correlation data where the adapter supports them.
+
+| MQTT concept | ZigMV mapping | Boundary |
+| --- | --- | --- |
+| QoS 0 | `live` | At-most-once and bounded. |
+| Shared subscription | `work` group | One eligible worker receives the message. |
+| Retained message | `state` | Latest-value state with expiry. |
+| QoS 1 | `durable` plus ACK | Connected-session retry; duplicate delivery is possible. |
+| QoS 2 | No direct 0.6.0 equivalent | Full four-step exactly-once handshake is a future gate. |
+| Clean Start/session expiry | Adapter session policy | Native persistent cursor recovery is not complete in 0.6.0. |
+
+A deployment must not advertise MQTT QoS 2 compatibility merely because MQTT clients can connect. The adapter must either reject unsupported semantics or document the deliberate downgrade and its application consequences.
+
+## Migration example
+
+A sensor topic such as `factory/line1/motor7/temperature` can map directly to `factory.line1.motor7.temperature` for `live` telemetry. A retained configuration topic maps to `state`. A command topic maps to `durable`, and the edge worker ACKs the ZigMV delivery only after the actuator operation is safely recorded.
+
+## Validation
+
+Test topic wildcard conversion, retained state expiry, shared subscription fairness, QoS 1 duplicate handling, disconnect and reconnect, MQTT reason-code mapping, maximum packet size, authentication, and denied topic access. Run the adapter tests alongside the native benchmark so translation overhead is visible separately from broker routing overhead.

@@ -41,7 +41,7 @@ ZMV/1 foundation
     -> 1.0.0-beta
 ```
 
-The current release baseline is **`0.4.0`**, containing the ZMV/1 foundation, `live`, `work`, durable append, delivery IDs, ACK handling, retained state, expiry behavior, and bounded connected-session retry. The active public target is **`0.5.0`**, which is being implemented as one security, durability, benchmark, and edge-transfer train rather than a sequence of small tags. The complete gate checklist is [`ZIGMV_BETA_RELEASE_GATES.md`](ZIGMV_BETA_RELEASE_GATES.md).
+The historical release baseline is **`0.4.0`**, and the repository has since accumulated the grouped `0.5.0` and `0.6.0` foundations plus the edge and secure-transport work required for the **`1.0.0-beta.1` candidate**. The complete gate checklist is [`ZIGMV_BETA_RELEASE_GATES.md`](ZIGMV_BETA_RELEASE_GATES.md).
 
 ## Public PR policy
 
@@ -63,7 +63,8 @@ A beta release is not created just because the code compiles. The `1.0.0-beta.1`
 | ZMV/1 foundation | Merged and CI-tested |
 | `live` profile | Merged and CI-tested |
 | `work` profile | Merged and CI-tested |
-| Durable/state broker profiles | Implemented foundation in `0.4.0`; connected-session retry is tested, while restart and reconnect recovery remain open |
-| `0.5.0` authentication and resource security | Partially implemented: native ZigMV AUTH, subject ACLs, subscription limits, and per-client publish rate limits |
-| `0.5.0` edge transfer and compatibility | Pending: TLS/mTLS, authenticated edge links, reconnect/offline transfer, and full NATS/MQTT semantic adapters |
-| 1.0.0-beta | Blocked until all grouped release gates pass |
+| Durable/state broker profiles | Implemented bounded foundation with checksummed journal recovery, compaction, ACK/retry, expiry, and retained state |
+| Authentication and resource security | Implemented native AUTH, subject ACLs, subscription limits, publish rate limits, tenant policy, and remote-bind authentication defaults |
+| Edge transfer and secure transport | Implemented authenticated LINK forwarding, reconnect/cursor behavior, live TLS/mTLS listener/client paths, and secure bridge tests |
+| Operations and evidence | Metrics, health/readiness, CI validators, benchmark matrix, soak, hostile-input, fuzz-survival, failure-injection, and artifacts are present; final CI and extended evidence remain release conditions |
+| 1.0.0-beta | Candidate metadata and local gates prepared; stable tag remains blocked until final CI and remaining selected gates pass |

@@ -1,8 +1,13 @@
 const std = @import("std");
 
 pub const zigmv_state = @import("zigmv_state.zig");
+pub const zigmv_persist = @import("zigmv_persist.zig");
+pub const zigmv_edge = @import("zigmv_edge.zig");
+pub const metrics = @import("metrics.zig");
+pub const zigmv_link = @import("zigmv_link.zig");
+pub const zigmv_tenant = @import("zigmv_tenant.zig");
 
-pub const version = "0.6.0";
+pub const version = "1.0.0-beta.1";
 
 pub const max_topic_length: usize = 256;
 pub const max_payload_length: usize = 64 * 1024;

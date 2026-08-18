@@ -1,0 +1,41 @@
+{
+  "protocol": "zigmv",
+  "results": [
+    {
+      "payload_bytes": 0,
+      "messages": 1000,
+      "ack_publishes": true,
+      "returncode": 0,
+      "stdout": "status=PASS\nprotocol=zigmv profile=live payload_bytes=0 target_mps=0.00\nduration_seconds=0.067753 drain_seconds=0.067883\noffered_messages=1000 socket_accepted_messages=1000 broker_accepted_messages=1000 delivered_messages=1000\nlost_messages=0 delivery_ratio=1.000000 gaps=0 duplicates=0 invalid_frames=0\naccepted_msg_per_sec=14759.60 delivered_msg_per_sec=14731.13\nbackpressure_events=0\npublisher_bye_sent=true\n",
+      "stderr": "",
+      "port": 24680
+    },
+    {
+      "payload_bytes": 16,
+      "messages": 1000,
+      "ack_publishes": true,
+      "returncode": 0,
+      "stdout": "status=PASS\nprotocol=zigmv profile=live payload_bytes=16 target_mps=0.00\nduration_seconds=0.062533 drain_seconds=0.062672\noffered_messages=1000 socket_accepted_messages=1000 broker_accepted_messages=1000 delivered_messages=1000\nlost_messages=0 delivery_ratio=1.000000 gaps=0 duplicates=0 invalid_frames=0\naccepted_msg_per_sec=15991.50 delivered_msg_per_sec=15956.09\nbackpressure_events=0\npublisher_bye_sent=true\n",
+      "stderr": "",
+      "port": 24681
+    },
+    {
+      "payload_bytes": 128,
+      "messages": 1000,
+      "ack_publishes": true,
+      "returncode": 0,
+      "stdout": "status=PASS\nprotocol=zigmv profile=live payload_bytes=128 target_mps=0.00\nduration_seconds=0.059299 drain_seconds=0.069571\noffered_messages=1000 socket_accepted_messages=1000 broker_accepted_messages=1000 delivered_messages=1000\nlost_messages=0 delivery_ratio=1.000000 gaps=0 duplicates=0 invalid_frames=0\naccepted_msg_per_sec=16863.74 delivered_msg_per_sec=14373.71\nbackpressure_events=0\npublisher_bye_sent=true\n",
+      "stderr": "",
+      "port": 24682
+    },
+    {
+      "payload_bytes": 1024,
+      "messages": 1000,
+      "ack_publishes": true,
+      "returncode": 0,
+      "stdout": "status=PASS\nprotocol=zigmv profile=live payload_bytes=1024 target_mps=0.00\nduration_seconds=0.085583 drain_seconds=0.136506\noffered_messages=1000 socket_accepted_messages=1000 broker_accepted_messages=1000 delivered_messages=1000\nlost_messages=0 delivery_ratio=1.000000 gaps=0 duplicates=0 invalid_frames=0\naccepted_msg_per_sec=11684.55 delivered_msg_per_sec=7325.70\nbackpressure_events=0\npublisher_bye_sent=true\n",
+      "stderr": "",
+      "port": 24683
+    }
+  ]
+}

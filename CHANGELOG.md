@@ -2,12 +2,32 @@
 
 All notable changes to zigmq are documented here.
 
+## [1.0.0-beta.1] - Unreleased
+
+### Added
+
+- Live TLS 1.3 listener transport with certificate and private-key loading.
+- Required client-certificate mTLS verification against a configured CA bundle.
+- Shared plain/TLS protocol transport for native ZigMV, MQTT, NATS, and custom listeners.
+- TLS-authenticated outbound edge links with peer verification and client certificates.
+- Automated TLS/mTLS runtime rejection, acceptance, native protocol, and secure edge-bridge gates.
+
+### Validation status
+
+- Native unit, smoke, end-to-end, security, session-recovery, edge-link, TLS/mTLS, and secure edge-bridge gates pass locally on Zig 0.15.2.
+- Local benchmark, soak, deterministic fuzz-survival, compatibility-smoke, cross-target, artifact, and CI-equivalent evidence is recorded; final stable 1.0.0 tagging still requires release approval and any remaining authoritative gates.
+
+### Known limitations
+
+- This beta candidate does not claim full MQTT 5.0 interoperability, full NATS JetStream semantics, MQTT QoS 2 parity, distributed replication, or exactly-once delivery.
+
 ## [0.6.0] - Unreleased
 
 ### Added
 
 - Native authenticated ZigMV `STATS` command for process-local operational counters.
 - Counters for publications, deliveries, durable redeliveries, ACKs, expirations, active clients, subscriptions, and pending durable messages.
+- Bounded per-client publish-idempotency windows that return `ZMV/1 OK DUP <id>` without routing repeated numeric IDs; this is a foundation for exactly-once work and not an exactly-once guarantee.
 - Integration coverage proving STATS framing and retry/ACK counter behavior.
 - Unreleased 0.6.0 release notes and the complete beta-gate checklist through `1.0.0-beta.1`.
 
@@ -16,10 +36,12 @@ All notable changes to zigmq are documented here.
 - Consolidated recorded benchmark data in the README and `docs/ZIGMV_BENCHMARK_0.5.0.md`.
 - Historical local evidence includes 23,563.4 publish-ACK msg/s, 36,618.7 volatile stream-free publish-ACK msg/s, 6,294.2 local-stream publish-ACK msg/s, and 89,066.7 fan-out deliveries/s with 50 subscribers.
 - The 100M msg/s run remains an offered-rate stress target and is not claimed as end-to-end achieved throughput.
+- The native benchmark now synchronizes no-ACK runs through STATS before BYE and distinguishes socket-written, broker-accepted, delivered, lost, delivery ratio, duplicates, gaps, invalid frames, and backpressure.
+- The latest recorded 0.6.0 1,000-message, 128-byte live run delivered 994/1,000 messages with a 99.4% ratio under at-most-once overload; the corresponding publish-ACK run delivered 1,000/1,000.
 
 ### Known limitations
 
-- Native TLS/mTLS, authenticated edge links, bounded offline transfer, durable reconnect sessions, full NATS JetStream semantics, full MQTT 5.0 interoperability, MQTT QoS 2, and ZigMV `exact` remain blocked release gates.
+- Full NATS JetStream semantics, full MQTT 5.0 interoperability, MQTT QoS 2, distributed replication, and ZigMV `exact` remain unsupported non-claims. TLS/mTLS and authenticated edge-link foundations are implemented in the beta candidate.
 
 See [`docs/ZIGMV_RELEASE_0.6.0.md`](docs/ZIGMV_RELEASE_0.6.0.md) and [`docs/ZIGMV_BETA_RELEASE_GATES.md`](docs/ZIGMV_BETA_RELEASE_GATES.md).
 
@@ -52,7 +74,7 @@ See [`docs/ZIGMV_RELEASE_0.6.0.md`](docs/ZIGMV_RELEASE_0.6.0.md) and [`docs/ZIGM
 
 ### Known limitations
 
-- Native TLS/mTLS, authenticated remote edge links, bounded offline transfer, reconnect backoff, and full NATS/MQTT semantic compatibility remain pending for the complete 0.5.0 train.
+- The historical 0.5.0 train preceded the current TLS/mTLS and authenticated edge-link implementation. Full NATS/MQTT semantic compatibility remains outside the beta candidate’s claims.
 - ACL and rate-limit enforcement currently protects the native ZigMV path; legacy compatibility listeners remain separate migration surfaces.
 
 ## [0.4.0] - 2026-08-17

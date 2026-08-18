@@ -1,0 +1,32 @@
+---
+title: Guarantees and boundaries
+description: What ZigMV 0.6.0 guarantees, and what it does not claim.
+---
+
+# Guarantees and boundaries
+
+ZigMV documents delivery behavior per profile instead of using one global guarantee.
+
+## Implemented in 0.6.0
+
+| Capability | Guarantee boundary |
+| --- | --- |
+| `live` | At-most-once, bounded, volatile delivery. Overload loss is possible and must be measured. |
+| `work` | One eligible consumer in a matching group receives the routed message. Fairness and failure behavior are workload-dependent. |
+| `durable` | Delivery ID, consumer ACK, expiry, and bounded connected-session redelivery. Duplicate delivery is possible. |
+| `state` | Latest-value retention with expiry for matching subscribers. |
+| Authentication | Native token authentication with bounded pre-auth commands. |
+| Authorization | Subject-based publish and subscribe ACLs. |
+| Resource protection | Bounded clients, subscriptions, payloads, mailboxes, and per-client publish rate limits. |
+| Observability | Process-local `STATS` counters for benchmark and operational inspection. |
+| Publish idempotency foundation | Bounded per-client duplicate numeric-ID recognition within one session. |
+
+## Not yet claimed
+
+MQTT QoS 2 is not implemented. QoS 2 requires a complete multi-step handshake, duplicate suppression, and crash-safe state. Full NATS JetStream semantics are not implemented either; ZigMV has a durable append, ACK, replay, expiry, and connected-session retry foundation, but not complete persistent consumer cursors, durable reconnect sessions, or replicated recovery.
+
+Native TLS/mTLS, authenticated remote edge links, bounded offline transfer, reconnect cursors, durable restart recovery, and ZigMV `exact` remain release gates. The project must not advertise these as available features until their tests pass.
+
+<Warning>
+Do not use ZigMV `live` for irreversible commands. Use `durable`, require an ACK, and make the consumer operation idempotent.
+</Warning>

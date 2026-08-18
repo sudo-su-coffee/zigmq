@@ -1,0 +1,47 @@
+---
+title: ZigMV
+description: One edge-first messaging protocol for cloud, IoT, and services.
+---
+
+# ZigMV
+
+> One native protocol for fast telemetry, work distribution, acknowledged delivery, and retained device state.
+
+ZigMV is a lightweight messaging protocol for **cloud services, IoT devices, and edge gateways**. It combines NATS-inspired subject routing and service patterns with MQTT-inspired device-oriented delivery and retained state in a single canonical message envelope.
+
+ZigMV is a new protocol. It is not MQTT with an extension and not NATS joined to MQTT by an internal bridge. Existing MQTT and NATS systems can migrate through boundary adapters, while new applications can use the native `ZMV/1` protocol directly.
+
+<CardGroup cols={2}>
+  <Card title="Start with the protocol" icon="book-open" href="/introduction">
+    Understand the message model, profiles, and delivery boundaries.
+  </Card>
+  <Card title="Run a broker" icon="server" href="/quickstart">
+    Build ZigMV with Zig 0.15.2 and start a local edge broker.
+  </Card>
+  <Card title="Measure honestly" icon="chart-line" href="/operate/benchmarking">
+    Separate socket acceptance, broker acceptance, delivery, loss, and latency.
+  </Card>
+  <Card title="Deploy at the edge" icon="router" href="/operate/edge-deployment">
+    See how local brokers connect devices, sites, and cloud services.
+  </Card>
+</CardGroup>
+
+## 0.6.0 at a glance
+
+| Capability | Status |
+| --- | --- |
+| `live`, `work`, `durable`, and `state` profiles | Implemented foundation |
+| Native authentication, subject ACLs, and publish rate limits | Implemented and tested |
+| Connected-session durable retry | Implemented and tested |
+| Native `STATS` observability | Implemented in 0.6.0 |
+| Bounded publish-idempotency window | Implemented as an exactly-once foundation |
+| MQTT QoS 2 and ZigMV `exact` | Not enabled; future gate |
+| TLS/mTLS and authenticated remote edge links | Future gate |
+
+## Choose the right profile
+
+Use `live` for replaceable telemetry, `work` for one-of-N jobs, `durable` for acknowledged connected-session delivery, and `state` for last-value device state. Do not use `live` for commands that cannot be lost.
+
+<Note>
+The current 100M messages/sec run is an offered-rate stress target, not a verified end-to-end capacity claim. Always report accepted, delivered, lost, duplicate, gap, and latency metrics together.
+</Note>

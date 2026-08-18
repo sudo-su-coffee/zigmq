@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Smoke-test the native ZigMV/1 foundation."""
 import argparse
+import select
 import socket
 import subprocess
 import time
@@ -65,6 +66,18 @@ def main(binary: str, port: int) -> None:
         actual = [item for item in deliveries if item is not None]
         if len(actual) != 1 or not actual[0].startswith(b"ZMV/1 MSG work"):
             raise RuntimeError(f"work delivery was not one-of-N: {deliveries!r}")
+        for reader_socket, item in ((work_a, deliveries[0]), (work_b, deliveries[1])):
+            if item is not None and exact(reader_a if reader_socket is work_a else reader_b, 7) != b"hello\r\n":
+                raise RuntimeError("work payload framing failed")
+
+        publisher.sendall(b"ZMV/1 PUB work 1 jobs 5\r\nhello\r\n")
+        if line(publisher_reader) != b"ZMV/1 OK DUP 1\r\n":
+            raise RuntimeError("duplicate publish was not acknowledged as a duplicate")
+        for reader_socket, reader in ((work_a, reader_a), (work_b, reader_b)):
+            ready, _, _ = select.select([reader_socket], [], [], 0.15)
+            if ready:
+                unexpected = line(reader)
+                raise RuntimeError(f"duplicate publish was delivered: {unexpected!r}")
 
         live, live_reader = connect("127.0.0.1", port)
         sockets.append((live, live_reader))
@@ -132,7 +145,7 @@ def main(binary: str, port: int) -> None:
         if not stats.startswith("ZMV/1 STATS "):
             raise RuntimeError(f"stats response failed: {stats!r}")
         fields = dict(item.split("=", 1) for item in stats.split()[2:])
-        for name in ("clients", "subscriptions", "pending", "published", "delivered", "redelivered", "acknowledged", "expired"):
+        for name in ("clients", "subscriptions", "pending", "published", "delivered", "redelivered", "acknowledged", "expired", "rejected_clients", "payload_bytes"):
             if name not in fields or not fields[name].isdigit():
                 raise RuntimeError(f"invalid stats field {name}: {stats!r}")
         if int(fields["redelivered"]) < 1 or int(fields["acknowledged"]) < 2:

@@ -2,8 +2,14 @@ const std = @import("std");
 const net = std.net;
 const posix = std.posix;
 const zigmq = @import("zigmq");
+const edge = zigmq.zigmv_edge;
+const link = zigmq.zigmv_link;
+const tls = @import("zigmv_tls");
+const secure_transport = @import("secure_transport.zig");
 const cli = @import("cli.zig");
 const zmp = @import("zmp.zig");
+const persist = zigmq.zigmv_persist;
+const metrics = zigmq.metrics;
 
 const Allocator = std.mem.Allocator;
 const Protocol = enum { custom, nats, mqtt, zmp, zigmv };
@@ -23,9 +29,12 @@ const BrokerStats = struct {
     redelivered: u64 = 0,
     acknowledged: u64 = 0,
     expired: u64 = 0,
+    rejected_clients: u64 = 0,
+    payload_bytes: u64 = 0,
 };
 const DurableDelivery = struct {
-    client: *Client,
+    client: ?*Client,
+    session_id: []u8,
     topic: []u8,
     payload: []u8,
     expires_at_ms: u64,
@@ -37,6 +46,14 @@ const ZigmvSubscription = struct {
     profile: []u8,
     subject: []u8,
     group: ?[]u8 = null,
+};
+
+const EdgeLinkSpec = struct {
+    host: []const u8,
+    port: u16,
+    identity: []const u8,
+    filter: []const u8,
+    tls_config: ?*const secure_transport.Config = null,
 };
 
 fn mqttEncodeRemainingLength(value: usize, output: *[4]u8) usize {
@@ -87,6 +104,7 @@ var stop_requested = std.atomic.Value(bool).init(false);
 
 const Client = struct {
     stream: net.Stream,
+    transport: ?*secure_transport.Transport = null,
     allocator: Allocator,
     queue_mutex: std.Thread.Mutex = .{},
     queue_condition: std.Thread.Condition = .{},
@@ -107,6 +125,12 @@ const Client = struct {
     zigmv_client: bool = false,
     publish_window_ms: u64 = 0,
     publish_count: u32 = 0,
+    seen_publish_ids: std.AutoHashMap(u64, void),
+    session_id: ?[]u8 = null,
+    edge_link: bool = false,
+    link_session: ?link.LinkSession = null,
+    link_export_filter: ?[]u8 = null,
+    link_next_sequence: u64 = 1,
 
     fn init(stream: net.Stream, allocator: Allocator, authenticated: bool) Client {
         return .{
@@ -114,6 +138,7 @@ const Client = struct {
             .allocator = allocator,
             .authenticated = authenticated,
             .subscriptions = std.StringHashMap(?[]u8).init(allocator),
+            .seen_publish_ids = std.AutoHashMap(u64, void).init(allocator),
         };
     }
 
@@ -161,6 +186,17 @@ const Client = struct {
         }
         if (self.publish_count >= limit) return false;
         self.publish_count += 1;
+        return true;
+    }
+
+    fn rememberPublishId(self: *Client, message_id: ?u64) !bool {
+        const id = message_id orelse return true;
+        if (self.seen_publish_ids.contains(id)) return false;
+        if (self.seen_publish_ids.count() >= 4096) {
+            var iterator = self.seen_publish_ids.iterator();
+            if (iterator.next()) |entry| _ = self.seen_publish_ids.remove(entry.key_ptr.*);
+        }
+        try self.seen_publish_ids.put(id, {});
         return true;
     }
 
@@ -221,6 +257,19 @@ const Client = struct {
         return self.enqueueOwned(message);
     }
 
+    fn sendLinkFrame(self: *Client, profile: []const u8, subject: []const u8, payload: []const u8) !void {
+        var header: [512]u8 = undefined;
+        const header_bytes = try std.fmt.bufPrint(&header, "ZMV/1 LINK {d} {s} {s} {d}\r\n", .{ self.link_next_sequence, profile, subject, payload.len });
+        self.link_next_sequence +%= 1;
+        if (self.link_next_sequence == 0) self.link_next_sequence = 1;
+        const message = try self.allocator.alloc(u8, header_bytes.len + payload.len + 2);
+        errdefer self.allocator.free(message);
+        @memcpy(message[0..header_bytes.len], header_bytes);
+        @memcpy(message[header_bytes.len .. header_bytes.len + payload.len], payload);
+        @memcpy(message[header_bytes.len + payload.len ..], "\r\n");
+        return self.enqueueOwned(message);
+    }
+
     fn sendNatsMessage(self: *Client, subject: []const u8, sid: []const u8, payload: []const u8) !void {
         var header: [512]u8 = undefined;
         const header_bytes = try std.fmt.bufPrint(&header, "MSG {s} {s} {d}\r\n", .{ subject, sid, payload.len });
@@ -259,7 +308,11 @@ const Client = struct {
             }
             self.queue_mutex.unlock();
 
-            self.stream.writeAll(message) catch {
+            if (self.transport) |transport| transport.writeAll(message) catch {
+                self.allocator.free(message);
+                self.requestClose();
+                return;
+            } else self.stream.writeAll(message) catch {
                 self.allocator.free(message);
                 self.requestClose();
                 return;
@@ -272,6 +325,10 @@ const Client = struct {
         for (self.queue.items[self.queue_head..]) |message| self.allocator.free(message);
         self.queue.deinit(self.allocator);
         self.subscriptions.deinit();
+        self.seen_publish_ids.deinit();
+        if (self.session_id) |session_id| self.allocator.free(session_id);
+        if (self.link_session) |*session| session.deinit();
+        if (self.link_export_filter) |filter| self.allocator.free(filter);
         for (self.nats_subscriptions.items) |subscription| {
             self.allocator.free(subscription.subject);
             self.allocator.free(subscription.sid);
@@ -300,6 +357,8 @@ const Broker = struct {
     publish_allow: ?[]const u8,
     subscribe_allow: ?[]const u8,
     publish_rate_limit: u32,
+    max_clients: usize,
+    max_subscriptions_per_client: usize,
     mutex: std.Thread.Mutex = .{},
     clients: std.ArrayList(*Client) = .empty,
     exact_subscribers: std.StringHashMap(std.ArrayList(*Client)),
@@ -310,14 +369,16 @@ const Broker = struct {
     mqtt_subscriptions: std.ArrayList(MqttSubscription) = .empty,
     retained: std.StringHashMap(RetainedMessage),
     zigmv_subscriptions: std.ArrayList(ZigmvSubscription) = .empty,
+    edge_links: std.ArrayList(*Client) = .empty,
     stream_file: ?std.fs.File = null,
+    session_journal: ?persist.Journal = null,
     stream_sequence: u64 = 0,
     next_delivery_id: u64 = 1,
     durable_pending: std.AutoHashMap(u64, DurableDelivery),
     stats: BrokerStats = .{},
     delivery_generation: usize = 0,
 
-    fn init(allocator: Allocator, protocol: Protocol, host: []const u8, port: u16, auth_token: ?[]const u8, publish_allow: ?[]const u8, subscribe_allow: ?[]const u8, publish_rate_limit: u32, stream_file: ?std.fs.File) Broker {
+    fn init(allocator: Allocator, protocol: Protocol, host: []const u8, port: u16, auth_token: ?[]const u8, publish_allow: ?[]const u8, subscribe_allow: ?[]const u8, publish_rate_limit: u32, max_clients: usize, max_subscriptions_per_client: usize, stream_file: ?std.fs.File, session_journal: ?persist.Journal) Broker {
         return .{
             .allocator = allocator,
             .protocol = protocol,
@@ -327,12 +388,80 @@ const Broker = struct {
             .publish_allow = publish_allow,
             .subscribe_allow = subscribe_allow,
             .publish_rate_limit = publish_rate_limit,
+            .max_clients = max_clients,
+            .max_subscriptions_per_client = max_subscriptions_per_client,
             .exact_subscribers = std.StringHashMap(std.ArrayList(*Client)).init(allocator),
             .group_subscribers = std.StringHashMap(GroupBucket).init(allocator),
             .nats_subscribers = std.StringHashMap(std.ArrayList(NatsSubscriptionRef)).init(allocator),
             .retained = std.StringHashMap(RetainedMessage).init(allocator),
             .durable_pending = std.AutoHashMap(u64, DurableDelivery).init(allocator),
             .stream_file = stream_file,
+            .session_journal = session_journal,
+        };
+    }
+
+    fn recoverSessionJournal(self: *Broker) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const journal = &(self.session_journal orelse return);
+        var iterator = journal.pending().iterator();
+        const now_ms = @as(u64, @intCast(std.time.milliTimestamp()));
+        while (iterator.next()) |entry| {
+            const record = entry.value_ptr;
+            const session_id = try self.allocator.dupe(u8, record.session_id);
+            errdefer self.allocator.free(session_id);
+            const topic = try self.allocator.dupe(u8, record.subject);
+            errdefer self.allocator.free(topic);
+            const payload = try self.allocator.dupe(u8, record.payload);
+            errdefer self.allocator.free(payload);
+            try self.durable_pending.put(record.message_id, .{
+                .client = null,
+                .session_id = session_id,
+                .topic = topic,
+                .payload = payload,
+                .expires_at_ms = record.expires_at_ms,
+                .retry_at_ms = now_ms,
+            });
+            if (record.message_id >= self.next_delivery_id) self.next_delivery_id = record.message_id + 1;
+        }
+        if (self.next_delivery_id == 0) self.next_delivery_id = 1;
+    }
+
+    fn bindSession(self: *Broker, client: *Client) void {
+        const session_id = client.session_id orelse return;
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        var replay_ids: std.ArrayList(u64) = .empty;
+        defer replay_ids.deinit(self.allocator);
+        var iterator = self.durable_pending.iterator();
+        while (iterator.next()) |entry| {
+            if (std.mem.eql(u8, entry.value_ptr.session_id, session_id)) {
+                entry.value_ptr.client = client;
+                replay_ids.append(self.allocator, entry.key_ptr.*) catch return;
+            }
+        }
+        for (replay_ids.items) |message_id| {
+            const pending = self.durable_pending.getPtr(message_id) orelse continue;
+            client.sendZmpMessage("durable", message_id, pending.topic, pending.payload) catch |err| {
+                std.log.debug("session replay failed: {s}", .{@errorName(err)});
+            };
+        }
+    }
+
+    fn metricsSnapshot(self: *Broker) metrics.Snapshot {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return .{
+            .clients = self.clients.items.len,
+            .subscriptions = self.zigmv_subscriptions.items.len,
+            .pending_durable = self.durable_pending.count(),
+            .published_total = self.stats.published,
+            .delivered_total = self.stats.delivered,
+            .redelivered_total = self.stats.redelivered,
+            .acknowledged_total = self.stats.acknowledged,
+            .expired_total = self.stats.expired,
+            .rejected_clients_total = self.stats.rejected_clients,
+            .payload_bytes_total = self.stats.payload_bytes,
         };
     }
 
@@ -347,7 +476,10 @@ const Broker = struct {
     fn addClient(self: *Broker, client: *Client) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        if (self.clients.items.len >= zigmq.max_clients) return error.TooManyClients;
+        if (self.clients.items.len >= self.max_clients) {
+            self.stats.rejected_clients += 1;
+            return error.TooManyClients;
+        }
         try self.clients.append(self.allocator, client);
     }
 
@@ -409,6 +541,14 @@ const Broker = struct {
             self.allocator.free(filter);
         }
         client.mqtt_subscriptions.clearRetainingCapacity();
+        var edge_index: usize = 0;
+        while (edge_index < self.edge_links.items.len) {
+            if (self.edge_links.items[edge_index] == client) {
+                _ = self.edge_links.swapRemove(edge_index);
+            } else {
+                edge_index += 1;
+            }
+        }
         var zigmv_index: usize = 0;
         while (zigmv_index < self.zigmv_subscriptions.items.len) {
             const subscription = self.zigmv_subscriptions.items[zigmv_index];
@@ -428,10 +568,16 @@ const Broker = struct {
         var remove_ids: std.ArrayList(u64) = .empty;
         defer remove_ids.deinit(self.allocator);
         while (iterator.next()) |entry| {
-            if (entry.value_ptr.client == client) remove_ids.append(self.allocator, entry.key_ptr.*) catch break;
+            if (entry.value_ptr.client != client) continue;
+            if (client.session_id != null) {
+                entry.value_ptr.client = null;
+            } else {
+                remove_ids.append(self.allocator, entry.key_ptr.*) catch break;
+            }
         }
         for (remove_ids.items) |message_id| {
             if (self.durable_pending.fetchRemove(message_id)) |removed| {
+                self.allocator.free(removed.value.session_id);
                 self.allocator.free(removed.value.topic);
                 self.allocator.free(removed.value.payload);
             }
@@ -464,10 +610,12 @@ const Broker = struct {
             const shift: u6 = @intCast(@min(pending.attempts, 5));
             const delay_ms = @min(@as(u64, 30_000), @as(u64, 1_000) << shift);
             pending.retry_at_ms = now_ms + delay_ms;
-            self.stats.redelivered += 1;
-            pending.client.sendZmpMessage("durable", message_id, pending.topic, pending.payload) catch |err| {
-                std.log.debug("durable retry failed: {s}", .{@errorName(err)});
-            };
+            if (pending.client) |client| {
+                self.stats.redelivered += 1;
+                client.sendZmpMessage("durable", message_id, pending.topic, pending.payload) catch |err| {
+                    std.log.debug("durable retry failed: {s}", .{@errorName(err)});
+                };
+            }
         }
     }
 
@@ -508,16 +656,19 @@ const Broker = struct {
         self.retained.deinit();
         var pending_iterator = self.durable_pending.iterator();
         while (pending_iterator.next()) |entry| {
+            self.allocator.free(entry.value_ptr.session_id);
             self.allocator.free(entry.value_ptr.topic);
             self.allocator.free(entry.value_ptr.payload);
         }
         self.durable_pending.deinit();
+        if (self.session_journal) |*journal| journal.deinit();
         for (self.zigmv_subscriptions.items) |subscription| {
             self.allocator.free(subscription.profile);
             self.allocator.free(subscription.subject);
             if (subscription.group) |group| self.allocator.free(group);
         }
         self.zigmv_subscriptions.deinit(self.allocator);
+        self.edge_links.deinit(self.allocator);
         if (self.stream_file) |file| file.close();
         self.clients.deinit(self.allocator);
     }
@@ -637,7 +788,7 @@ const Broker = struct {
     fn subscribeZigmv(self: *Broker, client: *Client, profile: []const u8, subject: []const u8, group: ?[]const u8) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        if (self.zigmv_subscriptions.items.len >= zigmq.max_subscriptions_per_client * zigmq.max_clients) return error.TooManySubscriptions;
+        if (self.zigmv_subscriptions.items.len >= self.max_subscriptions_per_client * self.max_clients) return error.TooManySubscriptions;
         for (self.zigmv_subscriptions.items) |subscription| {
             if (subscription.client == client and std.mem.eql(u8, subscription.profile, profile) and std.mem.eql(u8, subscription.subject, subject)) return error.DuplicateSubscription;
         }
@@ -676,9 +827,10 @@ const Broker = struct {
         }
     }
 
-    fn publishZigmv(self: *Broker, profile: []const u8, topic: []const u8, payload: []const u8, ttl_ms: u64) !void {
+    fn publishZigmv(self: *Broker, profile: []const u8, topic: []const u8, payload: []const u8, ttl_ms: u64, source: ?*Client) !void {
         self.mutex.lock();
         self.stats.published += 1;
+        self.stats.payload_bytes += payload.len;
         defer self.mutex.unlock();
         self.delivery_generation +%= 1;
         if (self.delivery_generation == 0) self.delivery_generation = 1;
@@ -703,13 +855,26 @@ const Broker = struct {
                 const payload_copy = try self.allocator.dupe(u8, payload);
                 errdefer self.allocator.free(payload_copy);
                 const now_ms = @as(u64, @intCast(std.time.milliTimestamp()));
-                try self.durable_pending.put(message_id, .{ .client = subscription.client, .topic = topic_copy, .payload = payload_copy, .expires_at_ms = now_ms + ttl_ms, .retry_at_ms = now_ms + 1000 });
+                const session_id = subscription.client.session_id orelse "";
+                if (self.session_journal) |*journal| {
+                    if (session_id.len != 0) try journal.appendPublish(session_id, message_id, topic, payload, now_ms + ttl_ms);
+                }
+                const session_copy = try self.allocator.dupe(u8, session_id);
+                errdefer self.allocator.free(session_copy);
+                try self.durable_pending.put(message_id, .{ .client = subscription.client, .session_id = session_copy, .topic = topic_copy, .payload = payload_copy, .expires_at_ms = now_ms + ttl_ms, .retry_at_ms = now_ms + 1000 });
                 self.stats.delivered += 1;
                 subscription.client.sendZmpMessage("durable", message_id, topic, payload) catch |err| std.log.debug("durable delivery failed: {s}", .{@errorName(err)});
             } else {
                 self.stats.delivered += 1;
                 subscription.client.sendZmpMessage(profile, 0, topic, payload) catch |err| std.log.debug("zigmv delivery failed: {s}", .{@errorName(err)});
             }
+        }
+        for (self.edge_links.items) |edge_client| {
+            if (source) |origin| if (edge_client == origin) continue;
+            if (edge_client.link_export_filter) |filter| {
+                if (!zigmq.subjectMatches(filter, topic)) continue;
+            }
+            edge_client.sendLinkFrame(profile, topic, payload) catch |err| std.log.debug("edge link delivery failed: {s}", .{@errorName(err)});
         }
         var work_iterator = work_clients.iterator();
         while (work_iterator.next()) |entry| {
@@ -722,8 +887,12 @@ const Broker = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         const pending = self.durable_pending.get(message_id) orelse return false;
-        if (pending.client != client) return false;
+        if (pending.client != client and !(pending.client == null and client.session_id != null and std.mem.eql(u8, pending.session_id, client.session_id.?))) return false;
+        if (self.session_journal) |*journal| {
+            journal.appendAck(message_id) catch return false;
+        }
         const removed = self.durable_pending.fetchRemove(message_id).?;
+        self.allocator.free(removed.value.session_id);
         self.allocator.free(removed.value.topic);
         self.allocator.free(removed.value.payload);
         self.stats.acknowledged += 1;
@@ -923,7 +1092,7 @@ const Broker = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         if (client.subscriptions.contains(subject)) return false;
-        if (client.subscriptions.count() >= zigmq.max_subscriptions_per_client) return error.TooManySubscriptions;
+        if (client.subscriptions.count() >= self.max_subscriptions_per_client) return error.TooManySubscriptions;
         const copy = try self.allocator.dupe(u8, subject);
         errdefer self.allocator.free(copy);
         const group_copy = if (group) |value| try self.allocator.dupe(u8, value) else null;
@@ -1056,21 +1225,22 @@ fn authMatches(line: []const u8, expected: []const u8) bool {
     return secureEqual(line[value_start + 1 .. value_end], expected);
 }
 
-fn readLine(reader: *net.Stream.Reader) !?[]const u8 {
-    return reader.interface().takeDelimiter('\n') catch |err| switch (err) {
+fn readLine(reader: *secure_transport.Reader) !?[]const u8 {
+    return reader.takeDelimiter('\n') catch |err| switch (err) {
         error.StreamTooLong => return error.LineTooLong,
         error.ReadFailed => return error.ReadFailed,
+        else => return err,
     };
 }
 
 const MqttPacket = struct { first: u8, body: []u8 };
 
-fn mqttDecodeRemainingLength(reader: *net.Stream.Reader) !usize {
+fn mqttDecodeRemainingLength(reader: *secure_transport.Reader) !usize {
     var value: usize = 0;
     var multiplier: usize = 1;
     var count: usize = 0;
     while (count < 4) : (count += 1) {
-        const encoded = try reader.interface().takeByte();
+        const encoded = try reader.takeByte();
         value += @as(usize, encoded & 127) * multiplier;
         if ((encoded & 128) == 0) return value;
         multiplier *= 128;
@@ -1078,13 +1248,13 @@ fn mqttDecodeRemainingLength(reader: *net.Stream.Reader) !usize {
     return error.InvalidMqttLength;
 }
 
-fn readMqttPacket(reader: *net.Stream.Reader, allocator: Allocator) !MqttPacket {
-    const first = try reader.interface().takeByte();
+fn readMqttPacket(reader: *secure_transport.Reader, allocator: Allocator) !MqttPacket {
+    const first = try reader.takeByte();
     const remaining_length = try mqttDecodeRemainingLength(reader);
     if (remaining_length > zigmq.max_payload_length + zigmq.max_topic_length + 1024) return error.MqttPacketTooLarge;
     const body = try allocator.alloc(u8, remaining_length);
     errdefer allocator.free(body);
-    if (remaining_length > 0) try reader.interface().readSliceAll(body);
+    if (remaining_length > 0) try reader.readSliceAll(body);
     return .{ .first = first, .body = body };
 }
 
@@ -1137,12 +1307,12 @@ fn mqttSendFixed(client: *Client, first: u8, body: []const u8) !void {
     return client.enqueueOwned(packet);
 }
 
-fn readNatsPayload(reader: *net.Stream.Reader, allocator: Allocator, length: usize) ![]u8 {
+fn readNatsPayload(reader: *secure_transport.Reader, allocator: Allocator, length: usize) ![]u8 {
     if (length > zigmq.max_payload_length) return error.PayloadTooLong;
     const payload = try allocator.alloc(u8, length);
     errdefer allocator.free(payload);
-    if (length > 0) reader.interface().readSliceAll(payload) catch return error.InvalidPayload;
-    const terminator = reader.interface().take(2) catch return error.InvalidPayload;
+    if (length > 0) reader.readSliceAll(payload) catch return error.InvalidPayload;
+    const terminator = reader.take(2) catch return error.InvalidPayload;
     if (!std.mem.eql(u8, terminator, "\r\n")) return error.InvalidPayload;
     return payload;
 }
@@ -1253,7 +1423,7 @@ fn natsError(client: *Client, message: []const u8) bool {
     return true;
 }
 
-fn handleNatsCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader, line: []const u8) bool {
+fn handleNatsCommand(broker: *Broker, client: *Client, reader: *secure_transport.Reader, line: []const u8) bool {
     var tokens = std.mem.tokenizeAny(u8, std.mem.trim(u8, line, " \t\r\n"), " \t");
     const operation = tokens.next() orelse return natsError(client, "Empty Command");
     if (!client.authenticated and !std.ascii.eqlIgnoreCase(operation, "CONNECT")) {
@@ -1449,7 +1619,7 @@ fn handleMqttPublish(broker: *Broker, client: *Client, first: u8, body: []const 
     return true;
 }
 
-fn handleMqttCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader) bool {
+fn handleMqttCommand(broker: *Broker, client: *Client, reader: *secure_transport.Reader) bool {
     const packet = readMqttPacket(reader, broker.allocator) catch return false;
     defer broker.allocator.free(packet.body);
     const packet_type = packet.first >> 4;
@@ -1478,7 +1648,7 @@ fn zmpError(client: *Client, message: []const u8) bool {
     return true;
 }
 
-fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader, line: []const u8) bool {
+fn handleZmpCommand(broker: *Broker, client: *Client, reader: *secure_transport.Reader, line: []const u8) bool {
     var tokens = std.mem.tokenizeAny(u8, std.mem.trim(u8, line, " \t\r\n"), " \t");
     const magic = tokens.next() orelse return zmpError(client, "empty_frame");
     const expected_magic = if (client.zigmv_client) "ZMV/1" else "ZMP/1";
@@ -1498,6 +1668,76 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
         } else {
             client.sendFmt("{s} OK AUTH disabled\r\n", .{expected_magic}) catch return false;
         }
+        return true;
+    }
+    if (std.mem.eql(u8, operation, "LINK")) {
+        if (!client.zigmv_client) return zmpError(client, "link_not_supported");
+        const link_action = tokens.next() orelse return zmpError(client, "missing_link_action");
+        if (std.mem.eql(u8, link_action, "AUTH")) {
+            const identity = tokens.next() orelse return zmpError(client, "missing_identity");
+            const presented = tokens.next() orelse return zmpError(client, "missing_link_secret");
+            const export_filter = tokens.next() orelse return zmpError(client, "missing_export_filter");
+            if (tokens.next() != null) return zmpError(client, "invalid_link_auth");
+            const expected = broker.auth_token orelse return zmpError(client, "link_auth_required");
+            var session = link.LinkSession.init(broker.allocator, identity, expected) catch return zmpError(client, "invalid_link_identity");
+            if (!session.authenticate(presented)) {
+                session.deinit();
+                client.sendFmt("{s} ERR link_authentication_failed\r\n", .{expected_magic}) catch {};
+                return false;
+            }
+            zigmq.validateSubject(export_filter, true) catch {
+                session.deinit();
+                return zmpError(client, "invalid_export_filter");
+            };
+            const filter_copy = broker.allocator.dupe(u8, export_filter) catch {
+                session.deinit();
+                return zmpError(client, "out_of_memory");
+            };
+            if (client.link_session) |*old_session| old_session.deinit();
+            if (client.link_export_filter) |old_filter| broker.allocator.free(old_filter);
+            client.link_session = session;
+            client.link_export_filter = filter_copy;
+            client.edge_link = true;
+            client.authenticated = true;
+            broker.mutex.lock();
+            broker.edge_links.append(broker.allocator, client) catch |err| {
+                broker.mutex.unlock();
+                client.edge_link = false;
+                client.link_session.?.deinit();
+                client.link_session = null;
+                broker.allocator.free(filter_copy);
+                client.link_export_filter = null;
+                return zmpError(client, if (err == error.OutOfMemory) "out_of_memory" else "link_registry_failed");
+            };
+            broker.mutex.unlock();
+            client.sendFmt("{s} OK LINK AUTH {s}\r\n", .{ expected_magic, identity }) catch return false;
+            return true;
+        }
+        if (std.mem.eql(u8, link_action, "ACK")) {
+            _ = tokens.next() orelse return zmpError(client, "missing_link_ack_sequence");
+            _ = tokens.next() orelse return zmpError(client, "missing_link_ack_status");
+            if (tokens.next() != null) return zmpError(client, "invalid_link_ack");
+            return true;
+        }
+        if (!client.edge_link or client.link_session == null) return zmpError(client, "link_authentication_required");
+        const sequence = std.fmt.parseInt(u64, link_action, 10) catch return zmpError(client, "invalid_link_sequence");
+        const profile = tokens.next() orelse return zmpError(client, "missing_link_profile");
+        if (!std.mem.eql(u8, profile, "live") and !std.mem.eql(u8, profile, "work") and !std.mem.eql(u8, profile, "durable") and !std.mem.eql(u8, profile, "state")) return zmpError(client, "invalid_link_profile");
+        const subject = tokens.next() orelse return zmpError(client, "missing_link_subject");
+        const size_text = tokens.next() orelse return zmpError(client, "missing_link_length");
+        if (tokens.next() != null) return zmpError(client, "invalid_link_frame");
+        zigmq.validateTopic(subject) catch return zmpError(client, "invalid_link_subject");
+        const size = std.fmt.parseInt(usize, size_text, 10) catch return zmpError(client, "invalid_link_length");
+        const payload = readNatsPayload(reader, broker.allocator, size) catch return zmpError(client, "invalid_link_payload");
+        defer broker.allocator.free(payload);
+        const cursor = client.link_session.?.acceptSequence(sequence) catch return zmpError(client, "invalid_link_cursor");
+        if (cursor == .duplicate) {
+            client.sendFmt("{s} LINK ACK {d} DUP\r\n", .{ expected_magic, sequence }) catch return false;
+            return true;
+        }
+        broker.publishZigmv(profile, subject, payload, 60_000, client) catch return zmpError(client, "link_publish_failed");
+        const status = if (cursor == .gap) "GAP" else "OK";
+        client.sendFmt("{s} LINK ACK {d} {s}\r\n", .{ expected_magic, sequence, status }) catch return false;
         return true;
     }
     if (!client.authenticated) {
@@ -1522,6 +1762,17 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
         client.sendFmt("{s} BYE\r\n", .{expected_magic}) catch {};
         return false;
     }
+    if (std.mem.eql(u8, operation, "SESSION")) {
+        if (!client.zigmv_client) return zmpError(client, "session_not_supported");
+        const session_id = tokens.next() orelse return zmpError(client, "missing_session");
+        if (tokens.next() != null) return zmpError(client, "invalid_command");
+        zigmq.validateTopic(session_id) catch return zmpError(client, "invalid_session");
+        if (client.session_id) |old_session| broker.allocator.free(old_session);
+        client.session_id = broker.allocator.dupe(u8, session_id) catch return zmpError(client, "out_of_memory");
+        client.sendFmt("{s} OK SESSION {s}\r\n", .{ expected_magic, session_id }) catch return false;
+        broker.bindSession(client);
+        return true;
+    }
     if (std.mem.eql(u8, operation, "STATS")) {
         if (!client.zigmv_client or tokens.next() != null) return zmpError(client, "invalid_command");
         broker.mutex.lock();
@@ -1530,7 +1781,7 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
         const subscriptions = broker.zigmv_subscriptions.items.len;
         const pending = broker.durable_pending.count();
         broker.mutex.unlock();
-        client.sendFmt("{s} STATS clients={d} subscriptions={d} pending={d} published={d} delivered={d} redelivered={d} acknowledged={d} expired={d}\r\n", .{ expected_magic, clients, subscriptions, pending, stats.published, stats.delivered, stats.redelivered, stats.acknowledged, stats.expired }) catch return false;
+        client.sendFmt("{s} STATS clients={d} subscriptions={d} pending={d} published={d} delivered={d} redelivered={d} acknowledged={d} expired={d} rejected_clients={d} payload_bytes={d}\r\n", .{ expected_magic, clients, subscriptions, pending, stats.published, stats.delivered, stats.redelivered, stats.acknowledged, stats.expired, stats.rejected_clients, stats.payload_bytes }) catch return false;
         return true;
     }
     if (std.mem.eql(u8, operation, "SUB") or std.mem.eql(u8, operation, "UNSUB")) {
@@ -1588,10 +1839,15 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
         if (client.zigmv_client) {
             if (!broker.publishSubjectAllowed(subject)) return zmpError(client, "publish_denied");
             if (!client.allowPublishRate(broker.publish_rate_limit)) return zmpError(client, "rate_limited");
+            const fresh_publish = client.rememberPublishId(id) catch return zmpError(client, "out_of_memory");
+            if (!fresh_publish) {
+                if (id) |message_id| client.sendFmt("{s} OK DUP {d}\r\n", .{ expected_magic, message_id }) catch return false;
+                return true;
+            }
             if (std.mem.eql(u8, mode, "state")) {
                 broker.setRetained(subject, payload, 0) catch return zmpError(client, "state_store_failed");
             }
-            broker.publishZigmv(mode, subject, payload, 60_000) catch return zmpError(client, "publish_failed");
+            broker.publishZigmv(mode, subject, payload, 60_000, null) catch return zmpError(client, "publish_failed");
         } else if (std.mem.eql(u8, mode, "work")) broker.publishWork(subject, payload) else broker.publish(subject, payload);
         if (id) |message_id| client.sendFmt("{s} OK PUB {d}\r\n", .{ expected_magic, message_id }) catch return false;
         return true;
@@ -1606,13 +1862,143 @@ fn handleZmpCommand(broker: *Broker, client: *Client, reader: *net.Stream.Reader
     return zmpError(client, "unknown_command");
 }
 
-fn handleClient(broker: *Broker, stream: net.Stream) void {
+fn edgeLinkLoop(broker: *Broker, spec: EdgeLinkSpec) void {
+    var backoff_ms: u64 = 250;
+    while (!stop_requested.load(.seq_cst)) {
+        const address = net.Address.parseIp4(spec.host, spec.port) catch {
+            std.Thread.sleep(backoff_ms * std.time.ns_per_ms);
+            backoff_ms = @min(@as(u64, 30_000), backoff_ms * 2);
+            continue;
+        };
+        const stream = net.tcpConnectToAddress(address) catch |err| {
+            std.log.debug("edge link connect failed to {s}:{d}: {s}", .{ spec.host, spec.port, @errorName(err) });
+            std.Thread.sleep(backoff_ms * std.time.ns_per_ms);
+            backoff_ms = @min(@as(u64, 30_000), backoff_ms * 2);
+            continue;
+        };
+        var transport = if (spec.tls_config) |config|
+            (secure_transport.Transport.tlsConnect(config.allocator, stream, config.*, spec.host) catch |err| {
+                std.log.debug("edge TLS handshake failed to {s}:{d}: {s}", .{ spec.host, spec.port, @errorName(err) });
+                stream.close();
+                std.Thread.sleep(backoff_ms * std.time.ns_per_ms);
+                backoff_ms = @min(@as(u64, 30_000), backoff_ms * 2);
+                continue;
+            })
+        else
+            secure_transport.Transport.plain(stream);
+        transport.rebind();
+        var client = Client.init(stream, broker.allocator, false);
+        client.transport = &transport;
+        client.zmp_client = false;
+        client.zigmv_client = true;
+        const session = link.LinkSession.init(broker.allocator, spec.identity, broker.auth_token orelse "") catch {
+            stream.close();
+            return;
+        };
+        client.link_session = session;
+        _ = client.link_session.?.authenticate(broker.auth_token.?);
+        client.edge_link = true;
+        client.authenticated = true;
+        client.link_export_filter = broker.allocator.dupe(u8, spec.filter) catch {
+            client.link_session.?.deinit();
+            client.link_session = null;
+            stream.close();
+            return;
+        };
+        if (broker.addClient(&client)) |_| {} else |_| {
+            client.deinit();
+            stream.close();
+            return;
+        }
+        broker.mutex.lock();
+        broker.edge_links.append(broker.allocator, &client) catch {
+            broker.mutex.unlock();
+            broker.disconnect(&client);
+            client.deinit();
+            stream.close();
+            return;
+        };
+        broker.mutex.unlock();
+        const writer = std.Thread.spawn(.{}, Client.writerLoop, .{&client}) catch {
+            broker.disconnect(&client);
+            client.deinit();
+            stream.close();
+            return;
+        };
+        var reader = transport.reader();
+        const ready = readLine(&reader) catch null;
+        if (ready == null) {
+            client.requestClose();
+        } else {
+            client.sendFmt("ZMV/1 LINK AUTH {s} {s} {s}\r\n", .{ spec.identity, broker.auth_token.?, spec.filter }) catch |err| std.log.debug("edge link auth send failed: {s}", .{@errorName(err)});
+            while (!stop_requested.load(.seq_cst)) {
+                const line = readLine(&reader) catch break;
+                if (line == null) break;
+                const response_line = std.mem.trim(u8, line.?, " \t\r\n");
+                if (std.mem.startsWith(u8, response_line, "ZMV/1 OK LINK AUTH")) continue;
+                if (!handleZmpCommand(broker, &client, &reader, line.?)) break;
+            }
+        }
+        client.requestClose();
+        writer.join();
+        broker.disconnect(&client);
+        client.deinit();
+        stream.close();
+        backoff_ms = @min(@as(u64, 30_000), backoff_ms * 2);
+        std.Thread.sleep(backoff_ms * std.time.ns_per_ms);
+    }
+}
+
+fn metricsLoop(broker: *Broker, server: *net.Server) void {
+    var request_buffer: [1024]u8 = undefined;
+    while (!stop_requested.load(.seq_cst)) {
+        const connection = server.accept() catch |err| {
+            if (err == error.WouldBlock or err == error.Interrupted) {
+                std.Thread.sleep(10 * std.time.ns_per_ms);
+                continue;
+            }
+            if (stop_requested.load(.seq_cst)) break;
+            std.log.debug("metrics accept failed: {s}", .{@errorName(err)});
+            continue;
+        };
+        defer connection.stream.close();
+        const received = connection.stream.read(&request_buffer) catch continue;
+        if (received == 0) continue;
+        const request = request_buffer[0..received];
+        const is_metrics = std.mem.startsWith(u8, request, "GET /metrics ");
+        const is_health = std.mem.startsWith(u8, request, "GET /health ");
+        const is_ready = std.mem.startsWith(u8, request, "GET /readyz ");
+        if (!is_metrics and !is_health and !is_ready) {
+            connection.stream.writeAll("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n") catch {};
+            continue;
+        }
+        var body_buffer: [4096]u8 = undefined;
+        const body = if (is_metrics) metrics.format(broker.metricsSnapshot(), zigmq.version, &body_buffer) catch continue else "ok\n";
+        var response_header: [256]u8 = undefined;
+        const content_type = if (is_metrics) "text/plain; version=0.0.4; charset=utf-8" else "text/plain; charset=utf-8";
+        const header = std.fmt.bufPrint(&response_header, "HTTP/1.1 200 OK\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n", .{ content_type, body.len }) catch continue;
+        connection.stream.writeAll(header) catch continue;
+        connection.stream.writeAll(body) catch {};
+    }
+}
+
+fn handleClient(broker: *Broker, stream: net.Stream, tls_config: ?*const secure_transport.Config) void {
+    var transport = if (tls_config) |config|
+        (secure_transport.Transport.tlsAccept(config.allocator, stream, config.*) catch |err| {
+            std.log.err("TLS handshake failed: {s}", .{@errorName(err)});
+            stream.close();
+            return;
+        })
+    else
+        secure_transport.Transport.plain(stream);
+    transport.rebind();
     const initially_authenticated = broker.auth_token == null;
     var client = Client.init(stream, broker.allocator, initially_authenticated);
+    client.transport = &transport;
     client.zmp_client = broker.protocol == .zmp;
     client.zigmv_client = broker.protocol == .zigmv;
     defer client.deinit();
-    defer stream.close();
+    defer transport.close();
     if (broker.addClient(&client)) |_| {} else |_| {
         stream.writeAll("-ERR server overloaded\r\n") catch {};
         return;
@@ -1632,8 +2018,7 @@ fn handleClient(broker: *Broker, stream: net.Stream) void {
         client.send(if (initially_authenticated) "ZMV/1 READY\r\n" else "ZMV/1 READY auth=required\r\n") catch return;
     }
 
-    var input_buffer: [zigmq.max_control_line_length + 1]u8 = undefined;
-    var reader = stream.reader(&input_buffer);
+    var reader = transport.reader();
     while (!stop_requested.load(.seq_cst)) {
         const keep_running = if (broker.protocol == .mqtt) blk: {
             break :blk handleMqttCommand(broker, &client, &reader);
@@ -1688,15 +2073,28 @@ pub fn main() !void {
     var protocol: Protocol = .custom;
     var auth_token: ?[]const u8 = null;
     var auth_token_file: ?[]const u8 = null;
+    var allow_insecure_remote = false;
     var publish_allow: ?[]const u8 = null;
     var subscribe_allow: ?[]const u8 = null;
     var publish_rate_limit: u32 = 0;
+    var metrics_port: u16 = 0;
+    var max_clients: usize = zigmq.max_clients;
+    var max_subscriptions_per_client: usize = zigmq.max_subscriptions_per_client;
     var auth_token_owned: ?[]u8 = null;
     defer if (auth_token_owned) |token| {
         std.crypto.secureZero(u8, token);
         allocator.free(token);
     };
     var stream_path: ?[]const u8 = null;
+    var session_store_path: ?[]const u8 = null;
+    var edge_link_host: ?[]const u8 = null;
+    var edge_link_port: u16 = 0;
+    var edge_link_identity: ?[]const u8 = null;
+    var edge_link_filter: ?[]const u8 = null;
+    var tls_certificate_path: ?[]const u8 = null;
+    var tls_private_key_path: ?[]const u8 = null;
+    var tls_client_ca_path: ?[]const u8 = null;
+    var tls_require_client_certificate = false;
     var index: usize = if (args.len >= 2 and std.mem.eql(u8, args[1], "server")) 2 else 1;
     while (index < args.len) : (index += 1) {
         if (std.mem.eql(u8, args[index], "--host")) {
@@ -1720,6 +2118,22 @@ pub fn main() !void {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingAuthTokenFile;
             auth_token_file = args[index];
+        } else if (std.mem.eql(u8, args[index], "--allow-insecure-remote")) {
+            allow_insecure_remote = true;
+        } else if (std.mem.eql(u8, args[index], "--tls-cert")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingTlsCertificate;
+            tls_certificate_path = args[index];
+        } else if (std.mem.eql(u8, args[index], "--tls-key")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingTlsPrivateKey;
+            tls_private_key_path = args[index];
+        } else if (std.mem.eql(u8, args[index], "--tls-client-ca")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingTlsClientCa;
+            tls_client_ca_path = args[index];
+        } else if (std.mem.eql(u8, args[index], "--tls-require-client-cert")) {
+            tls_require_client_certificate = true;
         } else if (std.mem.eql(u8, args[index], "--publish-allow")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingPublishAllow;
@@ -1732,15 +2146,49 @@ pub fn main() !void {
             index += 1;
             if (index >= args.len) return error.MissingPublishRateLimit;
             publish_rate_limit = std.fmt.parseInt(u32, args[index], 10) catch return error.InvalidPublishRateLimit;
+        } else if (std.mem.eql(u8, args[index], "--max-clients")) {
+            index += 1;
+            if (index >= args.len) return error.MissingMaxClients;
+            max_clients = std.fmt.parseInt(usize, args[index], 10) catch return error.InvalidMaxClients;
+            if (max_clients == 0 or max_clients > zigmq.max_clients) return error.InvalidMaxClients;
+        } else if (std.mem.eql(u8, args[index], "--max-subscriptions")) {
+            index += 1;
+            if (index >= args.len) return error.MissingMaxSubscriptions;
+            max_subscriptions_per_client = std.fmt.parseInt(usize, args[index], 10) catch return error.InvalidMaxSubscriptions;
+            if (max_subscriptions_per_client == 0 or max_subscriptions_per_client > zigmq.max_subscriptions_per_client) return error.InvalidMaxSubscriptions;
+        } else if (std.mem.eql(u8, args[index], "--metrics-port")) {
+            index += 1;
+            if (index >= args.len) return error.MissingMetricsPort;
+            metrics_port = parsePort(args[index]) catch return error.InvalidMetricsPort;
         } else if (std.mem.eql(u8, args[index], "--stream")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingStreamPath;
             stream_path = args[index];
+        } else if (std.mem.eql(u8, args[index], "--session-store")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingSessionStorePath;
+            session_store_path = args[index];
+        } else if (std.mem.eql(u8, args[index], "--edge-link-host")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingEdgeLinkHost;
+            edge_link_host = args[index];
+        } else if (std.mem.eql(u8, args[index], "--edge-link-port")) {
+            index += 1;
+            if (index >= args.len) return error.MissingEdgeLinkPort;
+            edge_link_port = try parsePort(args[index]);
+        } else if (std.mem.eql(u8, args[index], "--edge-link-identity")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingEdgeLinkIdentity;
+            edge_link_identity = args[index];
+        } else if (std.mem.eql(u8, args[index], "--edge-link-filter")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingEdgeLinkFilter;
+            edge_link_filter = args[index];
         } else if (std.mem.eql(u8, args[index], "--version")) {
             std.debug.print("zigmq {s}\n", .{zigmq.version});
             return;
         } else if (std.mem.eql(u8, args[index], "--help")) {
-            std.debug.print("zigmq {s}\nUsage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats|mqtt|zmp|zigmv] [--auth-token token|--auth-token-file path] [--publish-allow subject[,subject...]] [--subscribe-allow subject[,subject...]] [--publish-rate-limit messages_per_second] [--stream path]\n", .{zigmq.version});
+            std.debug.print("zigmq {s}\nUsage: zigmq [--host 127.0.0.1] [--port 4222] [--protocol custom|nats|mqtt|zmp|zigmv] [--auth-token token|--auth-token-file path] [--allow-insecure-remote] [--publish-allow subject[,subject...]] [--subscribe-allow subject[,subject...]] [--publish-rate-limit messages_per_second] [--max-clients count] [--max-subscriptions count] [--metrics-port port] [--stream path] [--session-store path]\n", .{zigmq.version});
             return;
         } else {
             std.debug.print("Unknown argument: {s}\n", .{args[index]});
@@ -1749,6 +2197,11 @@ pub fn main() !void {
     }
 
     if (auth_token != null and auth_token_file != null) return error.DuplicateAuthConfiguration;
+    const has_edge_link = edge_link_host != null or edge_link_port != 0 or edge_link_identity != null or edge_link_filter != null;
+    if (has_edge_link and (edge_link_host == null or edge_link_port == 0 or edge_link_identity == null or edge_link_filter == null)) return error.IncompleteEdgeLinkConfiguration;
+    if (has_edge_link and auth_token == null and auth_token_file == null) return error.EdgeLinkRequiresAuth;
+    const loopback_host = std.mem.eql(u8, host, "127.0.0.1") or std.mem.eql(u8, host, "localhost") or std.mem.eql(u8, host, "::1");
+    if (!loopback_host and auth_token == null and !allow_insecure_remote) return error.RemoteBindRequiresAuth;
     if (auth_token_file) |path| {
         const token_data = try std.fs.cwd().readFileAlloc(allocator, path, zigmq.max_topic_length + 1);
         const token = std.mem.trim(u8, token_data, " \t\r\n");
@@ -1760,6 +2213,18 @@ pub fn main() !void {
         auth_token_owned = token_data;
         auth_token = token;
     }
+    if ((tls_certificate_path == null) != (tls_private_key_path == null)) return error.IncompleteTlsConfiguration;
+    var tls_config: ?secure_transport.Config = null;
+    if (tls_certificate_path) |certificate_path| {
+        tls_config = .{
+            .allocator = allocator,
+            .certificate_path = certificate_path,
+            .private_key_path = tls_private_key_path.?,
+            .client_ca_path = tls_client_ca_path,
+            .require_client_certificate = tls_require_client_certificate,
+        };
+        try tls_config.?.validate();
+    } else if (tls_client_ca_path != null or tls_require_client_certificate) return error.TlsClientAuthRequiresTls;
     stop_requested.store(false, .seq_cst);
     installSignalHandlers();
     const address = try net.Address.parseIp4(host, port);
@@ -1772,11 +2237,34 @@ pub fn main() !void {
         try file.chmod(0o600);
         stream_file = file;
     }
-    var broker = Broker.init(allocator, protocol, host, port, auth_token, publish_allow, subscribe_allow, publish_rate_limit, stream_file);
+    var session_journal: ?persist.Journal = null;
+    if (session_store_path) |path| {
+        var file = try std.fs.cwd().createFile(path, .{ .read = true, .truncate = false, .lock = .exclusive, .mode = 0o600 });
+        errdefer file.close();
+        try file.chmod(0o600);
+        session_journal = try persist.Journal.open(allocator, file);
+    }
+    var broker = Broker.init(allocator, protocol, host, port, auth_token, publish_allow, subscribe_allow, publish_rate_limit, max_clients, max_subscriptions_per_client, stream_file, session_journal);
     defer broker.deinit();
     try broker.recoverStreamSequence();
+    try broker.recoverSessionJournal();
     var threads: std.ArrayList(std.Thread) = .empty;
     defer threads.deinit(allocator);
+    var metrics_server: ?net.Server = null;
+    var metrics_thread: ?std.Thread = null;
+    var edge_link_thread: ?std.Thread = null;
+    if (metrics_port != 0) {
+        const metrics_address = try net.Address.parseIp4(host, metrics_port);
+        metrics_server = try metrics_address.listen(.{ .reuse_address = true, .force_nonblocking = true });
+        metrics_thread = try std.Thread.spawn(.{}, metricsLoop, .{ &broker, &metrics_server.? });
+    }
+    defer if (metrics_server) |*listener| listener.deinit();
+    defer if (metrics_thread) |thread| thread.join();
+    if (edge_link_host) |remote_host| {
+        const link_spec = EdgeLinkSpec{ .host = remote_host, .port = edge_link_port, .identity = edge_link_identity.?, .filter = edge_link_filter.?, .tls_config = if (tls_config) |*config| config else null };
+        edge_link_thread = try std.Thread.spawn(.{}, edgeLinkLoop, .{ &broker, link_spec });
+    }
+    defer if (edge_link_thread) |thread| thread.join();
 
     std.debug.print("zigmq listening on {s}:{d} protocol={s}\n", .{ host, port, @tagName(protocol) });
     while (!stop_requested.load(.seq_cst)) {
@@ -1790,7 +2278,7 @@ pub fn main() !void {
             std.log.err("accept failed: {s}", .{@errorName(err)});
             continue;
         };
-        const thread = std.Thread.spawn(.{}, handleClient, .{ &broker, connection.stream }) catch |err| {
+        const thread = std.Thread.spawn(.{}, handleClient, .{ &broker, connection.stream, if (tls_config) |*config| config else null }) catch |err| {
             std.log.err("could not start client thread: {s}", .{@errorName(err)});
             connection.stream.close();
             continue;

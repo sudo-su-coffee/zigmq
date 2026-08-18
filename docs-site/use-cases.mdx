@@ -1,0 +1,38 @@
+---
+title: Use cases
+description: Practical ZigMV deployments across devices, edge sites, and cloud services.
+---
+
+# Use cases
+
+## Industrial edge control
+
+A factory gateway receives replaceable temperature and vibration samples with `live`, publishes the current machine state with `state`, and sends safety-approved work orders through `durable`. The gateway can keep local traffic inside the site while cloud services consume selected subjects through an authenticated edge link once that feature is enabled.
+
+```text
+Sensors -> live telemetry -> Edge ZigMV -> Cloud analytics
+PLC state -> state retention -> Edge ZigMV -> Operator dashboard
+Control job -> durable ACK -> Edge worker -> Device actuator
+```
+
+The key design decision is to keep replaceable data fast while making commands explicit and acknowledged.
+
+## Logistics and fleet gateways
+
+Vehicles publish location and health samples with `live`. The latest configuration is stored with `state`. Dispatch jobs use `work` so one available regional worker handles each task. A service can use request/reply subjects for route checks without forcing device clients to run a heavyweight service protocol.
+
+## Cloud microservices
+
+A native ZigMV service can use subjects, reply subjects, correlation IDs, and `work` groups for request/reply and worker distribution. Existing NATS services can remain connected through a compatibility adapter during migration. Existing MQTT devices can continue using an MQTT adapter while new edge components use `ZMV/1`.
+
+## Retail and branch-office edge
+
+A small local broker handles scanners, sensors, and branch automation. `live` keeps UI telemetry responsive, `state` makes current device status available after a reconnect, and `durable` protects important inventory or configuration commands during a connected session. Resource limits keep a faulty device from consuming all gateway memory.
+
+## When not to use ZigMV 0.6.0
+
+Do not use the current release as a drop-in replacement when an application requires full MQTT 5.0 QoS 2, durable MQTT session resume, full NATS JetStream consumer recovery, native mTLS edge links, or proven exactly-once side effects. Those capabilities are explicitly planned release gates.
+
+## Why this model is useful
+
+Using one canonical envelope reduces duplicate policy and monitoring paths. The edge application chooses a delivery profile per message instead of choosing a different broker or client library for each data class. Adapters preserve migration paths, while native ZigMV clients can use the protocol directly when both ends are under the application’s control.

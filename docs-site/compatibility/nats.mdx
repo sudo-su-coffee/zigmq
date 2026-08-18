@@ -1,0 +1,28 @@
+---
+title: NATS adapter
+description: Map NATS subjects and service patterns into ZigMV.
+---
+
+# NATS adapter
+
+The NATS adapter is intended for services that already use NATS subjects, request/reply, and queue groups. Native ZigMV keeps the subject-oriented programming model while making delivery profile selection explicit.
+
+| NATS pattern | ZigMV mapping | Boundary |
+| --- | --- | --- |
+| Core publish/subscribe | `live` | Volatile at-most-once delivery. |
+| Queue group | `work` group | One eligible worker receives each routed message. |
+| Request/reply | Subject plus reply subject and correlation ID | Application-level timeout and error policy remain required. |
+| JetStream publish/consumer | `durable` foundation | Connected-session ACK and retry only in 0.6.0. |
+| Stream retention | `state` for latest value, or future persistent stream | Full append-only persistent stream is not complete. |
+
+## Migration example
+
+A NATS service subject `orders.created` can be published as ZigMV `live` when downstream consumers can tolerate loss. A payment or fulfillment command should instead use `durable`, include a correlation ID, and have the consumer ACK only after its idempotent transaction boundary.
+
+## JetStream caution
+
+ZigMV 0.6.0 must not be described as a JetStream replacement. Persistent stream storage, consumer cursors across restart, replay, replication, snapshotting, and crash-safe recovery are part of the 0.7.0 and later release gates.
+
+## Validation
+
+Test wildcard subject conversion, queue-group distribution, request/reply correlation, timeout mapping, reconnect behavior, duplicate delivery, ACK loss, and adapter backpressure. Measure native routing and adapter translation as separate benchmark stages.

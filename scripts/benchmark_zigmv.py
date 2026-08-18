@@ -80,8 +80,15 @@ def run_benchmark(args: argparse.Namespace) -> int:
     consumer_thread.start()
 
     publisher, publisher_reader = connect(args.host, args.port)
+    publisher.sendall(b"ZMV/1 STATS\r\n")
+    initial_stats_line = publisher_reader.readline().decode("ascii").strip()
+    if not initial_stats_line.startswith("ZMV/1 STATS "):
+        raise RuntimeError(f"initial benchmark synchronization failed: {initial_stats_line!r}")
+    initial_stats = dict(item.split("=", 1) for item in initial_stats_line.split()[2:])
+    baseline_published = int(initial_stats.get("published", "0"))
     offered = 0
     accepted = 0
+    broker_accepted = 0
     backpressure_events = 0
     publisher_bye_sent = False
     start = time.perf_counter()
@@ -94,7 +101,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
                 delay = next_target - time.perf_counter()
                 if delay > 0:
                     time.sleep(delay)
-            message_id = offered
+            message_id = str(offered) if args.ack_publishes else "-"
             frame = f"ZMV/1 PUB live {message_id} {subject} {len(payload)}\r\n".encode() + payload + b"\r\n"
             try:
                 publisher.sendall(frame)
@@ -104,12 +111,23 @@ def run_benchmark(args: argparse.Namespace) -> int:
                     if not response.startswith(b"ZMV/1 OK PUB"):
                         raise RuntimeError(f"publish acknowledgement failed: {response!r}")
                 accepted += 1
+                if args.ack_publishes:
+                    broker_accepted += 1
             except (socket.timeout, TimeoutError):
                 backpressure_events += 1
                 time.sleep(0.001)
             except OSError:
                 backpressure_events += 1
                 break
+        if not args.ack_publishes:
+            publisher.sendall(b"ZMV/1 STATS\r\n")
+            stats_line = publisher_reader.readline().decode("ascii").strip()
+            if not stats_line.startswith("ZMV/1 STATS "):
+                raise RuntimeError(f"benchmark synchronization failed: {stats_line!r}")
+            stats = dict(item.split("=", 1) for item in stats_line.split()[2:])
+            broker_accepted = int(stats.get("published", "0")) - baseline_published
+            if broker_accepted < accepted:
+                raise RuntimeError(f"broker accepted fewer messages than socket writer: {broker_accepted} < {accepted}")
     finally:
         send_end = time.perf_counter()
         try:
@@ -125,7 +143,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
         publisher.close()
 
     drain_deadline = time.perf_counter() + args.drain_timeout
-    while consumer.delivered < accepted and time.perf_counter() < drain_deadline and consumer.error is None:
+    while consumer.delivered < broker_accepted and time.perf_counter() < drain_deadline and consumer.error is None:
         time.sleep(0.01)
     stop.set()
     try:
@@ -138,19 +156,26 @@ def run_benchmark(args: argparse.Namespace) -> int:
 
     elapsed = max(send_end - start, 1e-9)
     drain_elapsed = max(time.perf_counter() - start, elapsed)
-    lost = max(0, accepted - consumer.delivered)
-    status = "PASS" if lost == 0 and consumer.invalid == 0 and consumer.duplicates == 0 else "FAIL"
+    lost = max(0, broker_accepted - consumer.delivered)
+    integrity_ok = consumer.invalid == 0 and consumer.duplicates == 0 and consumer.gaps == 0
+    if lost == 0 and integrity_ok:
+        status = "PASS"
+    elif args.allow_live_loss and not args.ack_publishes and integrity_ok:
+        status = "PASS_LOSSY_LIVE"
+    else:
+        status = "FAIL"
     print(f"status={status}")
     print(f"protocol=zigmv profile=live payload_bytes={args.payload_size} target_mps={args.target_mps:.2f}")
     print(f"duration_seconds={elapsed:.6f} drain_seconds={drain_elapsed:.6f}")
-    print(f"offered_messages={offered} accepted_messages={accepted} delivered_messages={consumer.delivered}")
-    print(f"lost_messages={lost} gaps={consumer.gaps} duplicates={consumer.duplicates} invalid_frames={consumer.invalid}")
+    print(f"offered_messages={offered} socket_accepted_messages={accepted} broker_accepted_messages={broker_accepted} delivered_messages={consumer.delivered}")
+    delivery_ratio = consumer.delivered / broker_accepted if broker_accepted else 1.0
+    print(f"lost_messages={lost} delivery_ratio={delivery_ratio:.6f} gaps={consumer.gaps} duplicates={consumer.duplicates} invalid_frames={consumer.invalid}")
     print(f"accepted_msg_per_sec={accepted / elapsed:.2f} delivered_msg_per_sec={consumer.delivered / drain_elapsed:.2f}")
     print(f"backpressure_events={backpressure_events}")
     print(f"publisher_bye_sent={str(publisher_bye_sent).lower()}")
     if consumer.error is not None:
         print(f"consumer_error={consumer.error}")
-    return 0 if status == "PASS" else 2
+    return 0 if status in ("PASS", "PASS_LOSSY_LIVE") else 2
 
 
 if __name__ == "__main__":
@@ -163,6 +188,7 @@ if __name__ == "__main__":
     parser.add_argument("--payload-size", type=int, default=128)
     parser.add_argument("--drain-timeout", type=float, default=10.0)
     parser.add_argument("--ack-publishes", action="store_true")
+    parser.add_argument("--allow-live-loss", action="store_true", help="allow expected at-most-once live loss while still failing integrity errors")
     args = parser.parse_args()
     if args.messages < 0 or args.duration < 0 or args.target_mps < 0 or args.payload_size < 0:
         parser.error("numeric values must be non-negative")

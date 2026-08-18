@@ -1,0 +1,46 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "ZigMV",
+  "description": "ZigMV 0.6.0 documentation: unified edge-first messaging for cloud, IoT, and services.",
+  "colors": {
+    "primary": "#7C3AED",
+    "light": "#A78BFA",
+    "dark": "#4C1D95"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Start here",
+        "pages": ["index", "introduction", "quickstart", "use-cases"]
+      },
+      {
+        "group": "Protocol",
+        "pages": ["protocol/overview", "protocol/profiles", "protocol/wire-format", "protocol/guarantees"]
+      },
+      {
+        "group": "Operate ZigMV",
+        "pages": ["operate/benchmarking", "operate/security", "operate/edge-deployment", "operate/observability"]
+      },
+      {
+        "group": "Compatibility",
+        "pages": ["compatibility/overview", "compatibility/nats", "compatibility/mqtt"]
+      },
+      {
+        "group": "Releases",
+        "pages": ["releases/0.6.0", "releases/0.7.0", "releases/0.8.0", "releases/roadmap"]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {"label": "GitHub", "href": "https://github.com/sudo-su-coffee/zigmq"},
+      {"label": "Protocol source", "href": "https://github.com/sudo-su-coffee/zigmq/blob/main/docs/ZIGMV_PROTOCOL.md"}
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/sudo-su-coffee/zigmq"
+    }
+  }
+}

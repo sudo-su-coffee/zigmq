@@ -1,0 +1,28 @@
+---
+title: Compatibility overview
+description: Connect existing MQTT and NATS systems through protocol-boundary adapters.
+---
+
+# Compatibility overview
+
+ZigMV compatibility is an adapter boundary, not a second internal broker. An adapter translates an external protocol into the canonical ZigMV envelope, applies policy, routes through the same profiles, and translates the result back.
+
+```text
+MQTT 5.0 client -> MQTT adapter --+
+                                  +-> canonical ZigMV envelope -> profile router
+NATS client ----> NATS adapter ---+
+                                  +-> live / work / durable / state
+Native client --> ZMV/1 ----------+
+```
+
+## Migration strategy
+
+Start with existing MQTT devices or NATS services at the boundary. Introduce native ZigMV clients for new edge gateways and services. Keep subject naming and correlation IDs stable during migration. Move one traffic class at a time to an explicit profile.
+
+## Compatibility principle
+
+The adapter must preserve meaning, not merely accept a TCP connection. Tests must verify subject filters, request/reply, retained state, expiry, ACK policy, error mapping, message IDs, duplicate behavior, and disconnect semantics.
+
+## Current boundary
+
+The 0.6.0 repository has compatibility foundations and regression tests, but it does not claim full MQTT 5.0 QoS 2, full MQTT session semantics, or full NATS JetStream parity. Read the protocol-specific pages before selecting ZigMV for a compatibility-sensitive deployment.

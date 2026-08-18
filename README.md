@@ -29,12 +29,16 @@
   </picture>
 </p>
 
-**zigmq** is a small TCP message broker written in Zig. The `0.4.0` release introduces **ZigMV (Zig Message Protocol)** as the native unified protocol inspired by the useful parts of NATS and MQTT 5.0.
+**zigmq** is a small TCP message broker written in Zig. The `1.0.0-beta.1` release train delivers **ZigMV (Zig Message Protocol)** as the native unified protocol inspired by the useful parts of NATS and MQTT 5.0.
 
 ZigMV uses one protocol and one message model for backend services, sensors, gateways, and edge applications. The native path provides live telemetry, work groups, durable delivery, and retained state without requiring separate client libraries. Existing custom, NATS-compatible, and MQTT-compatible listeners remain available as migration surfaces.
 
-> The project is now preparing the `0.5.0` security and edge-transfer train. Native TLS/mTLS and remote edge-link transfer remain gated work; the currently implemented security foundation includes authentication, subject ACLs, subscription limits, and per-client publish rate limits.
+> ZigMV `1.0.0-beta.1` is the current release candidate. It includes authentication, subject ACLs, subscription limits, per-client publish rate limits, STATS counters, bounded durable redelivery, persistent session journaling, authenticated edge links, and live TLS/mTLS transport. Full MQTT 5.0 interoperability, full NATS JetStream semantics, MQTT QoS 2 parity, distributed replication, and exactly-once delivery remain non-claims.
 
+
+## Documentation
+
+The separate self-hostable [Mintlify documentation site](docs-site/) contains the protocol guide, wire format, delivery guarantees, benchmarking method, security guidance, edge architecture, MQTT/NATS adapter notes, and the roadmap to `1.0.0-beta`. The beta upgrade, rollback, and failure-semantics procedures are documented in [`docs/ZIGMV_BETA_OPERATIONS.md`](docs/ZIGMV_BETA_OPERATIONS.md).
 
 ## Why zigmq?
 
@@ -52,7 +56,7 @@ ZigMV uses one protocol and one message model for backend services, sensors, gat
 
 ### Download a beta binary
 
-Open the [0.4.0 release](https://github.com/sudo-su-coffee/zigmq/releases/tag/v0.4.0) and download the archive for your platform when available.
+Open the [GitHub releases](https://github.com/sudo-su-coffee/zigmq/releases) page and select the published release or pre-release for your platform when available.
 
 ### Build from source
 
@@ -87,7 +91,7 @@ zig build run -- --version
 zig build run -- --help
 ```
 
-The current development train reports `zigmq 0.6.0` for the version command. This branch is an unreleased 0.6.0 observability and performance bundle; do not treat it as a published tag until its PR and CI gates pass.
+The current release candidate reports `zigmq 1.0.0-beta.1` for the version command. This branch remains an unreleased beta candidate until its complete CI, artifact, benchmark, and documentation gates pass.
 
 ## Native ZigMV
 
@@ -174,7 +178,7 @@ ZigMV is different from NATS and MQTT rather than being a drop-in replacement. I
 
 ![ZigMV edge architecture](docs/ZIGMV_EDGE_ARCHITECTURE.png)
 
-The local broker keeps volatile traffic close to devices, applies ACLs and bounded mailboxes, stores only configured durable/state data, and forwards selected subjects through a future authenticated edge link. The edge link design includes reconnect backoff, cursor transfer, bounded offline queues, lag, retry, and drop metrics, but native TLS/mTLS and remote offline transfer remain release gates rather than current guarantees.
+The local broker keeps volatile traffic close to devices, applies ACLs and bounded mailboxes, stores only configured durable/state data, and forwards selected subjects through an authenticated TLS-capable edge link. The edge link includes reconnect backoff, cursor transfer, bounded queues, lag, retry, and drop metrics; offline transfer semantics remain bounded and explicitly scoped.
 
 ## Custom protocol example
 
@@ -209,7 +213,7 @@ For a small trusted deployment, use a token file:
 zig build run -- --auth-token-file ./data/zigmq.token
 ```
 
-The beta has bounded resources to protect small edge systems: 1,024 clients, 1,024 subscriptions per client, eight unauthenticated commands, and bounded per-client queues. The current TCP transport is plaintext; put it behind a protected network or TLS-terminating proxy until native TLS is added.
+The beta has bounded resources to protect small edge systems: 1,024 clients, 1,024 subscriptions per client, eight unauthenticated commands, and bounded per-client queues. Use `--tls-cert`, `--tls-key`, `--tls-client-ca`, and `--tls-require-client-cert` for certificate-authenticated transport; plaintext remains available only when explicitly selected by deployment policy.
 
 ## Tests
 
@@ -232,7 +236,7 @@ python3 scripts/security_hardening_test.py --binary ./zig-out/bin/zigmq
 
 ## Benchmarks
 
-Start a native ZigMV server and measure live publish acknowledgements and fan-out delivery:
+Start a native ZigMV server and measure the consolidated 0.6.0 live and acknowledged delivery paths:
 
 ```sh
 zig build run -- --protocol zigmv --port 4222
@@ -242,10 +246,12 @@ python3 scripts/benchmark_zigmv.py --duration 10 --target-mps 35000 --payload-si
 That command measures acknowledged publish throughput. For NATS-like one-way live telemetry, omit publisher acknowledgements:
 
 ```sh
-python3 scripts/benchmark_zigmv.py --duration 10 --target-mps 35000 --payload-size 128
+python3 scripts/benchmark_zigmv.py --duration 10 --target-mps 35000 --payload-size 128 --allow-live-loss
 ```
 
-Use `--ack-publishes` when you want the acknowledged comparison. Run the matrix with payload sizes of 16, 128, and 1,024 bytes and subscriber counts of 1, 10, and 50. Record the commit, Zig version, optimization mode, CPU, memory, operating system, publish mode, publish rate, delivery rate, and latency. Benchmark numbers are machine-specific and are not performance guarantees.
+The `live` profile is at-most-once. `--allow-live-loss` makes the harness report `PASS_LOSSY_LIVE` when broker acceptance and frame integrity are correct but overload causes delivery loss; it does not hide gaps, duplicates, or invalid frames. Use `--ack-publishes` for the strict lossless comparison. The harness synchronizes no-ACK runs with native `STATS` before publisher shutdown, so socket-written and broker-accepted counts are not conflated.
+
+Run the matrix with payload sizes of 16, 128, and 1,024 bytes and subscriber counts of 1, 10, and 50. Record the commit, Zig version, optimization mode, CPU, memory, operating system, publish mode, publish rate, delivery rate, delivery ratio, and latency. Benchmark numbers are machine-specific and are not performance guarantees.
 
 ### Recorded benchmark evidence
 
@@ -253,6 +259,8 @@ The following values are real local benchmark artifacts stored under [`benchmark
 
 | Workload | Recorded result |
 | --- | ---: |
+| 0.6.0 live, 1,000 messages, 128-byte payload | **994/1,000 delivered; 99.4% delivery ratio; PASS_LOSSY_LIVE** |
+| 0.6.0 acknowledged live, 1,000 messages, 128-byte payload | **1,000/1,000 delivered; 100% delivery ratio; PASS** |
 | Publish ACK capacity | **23,563.4 msg/s** |
 | 50-subscriber fan-out source rate | **1,781.3 msg/s** |
 | 50-subscriber fan-out deliveries | **89,066.7 deliveries/s** |

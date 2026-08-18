@@ -1,0 +1,79 @@
+---
+title: Edge deployment
+description: Use ZigMV across devices, local gateways, regional brokers, and cloud services.
+---
+
+# Edge deployment
+
+ZigMV is designed for a topology in which a local broker can make decisions close to devices while selected traffic moves toward regional or cloud services.
+
+```text
+Sensors / PLCs / devices
+          |
+          | ZMV/1 over local TCP
+          v
++-------------------------+
+| Local ZigMV edge broker |
+| live / work / durable   |
+| state / ACL / limits    |
++-------------------------+
+          |
+          | authenticated edge link (future 0.6.x/0.7.x gate)
+          v
++-------------------------+
+| Regional or cloud broker|
+| services / analytics    |
++-------------------------+
+       |             |
+       v             v
+ MQTT adapter     NATS adapter
+ legacy devices   legacy services
+```
+
+## Traffic placement
+
+Keep high-rate replaceable telemetry local with `live` and export only aggregates or selected subjects. Keep machine commands in `durable` and require a consumer ACK. Store current device configuration with `state`. Use `work` for one-of-N edge workers.
+
+## Edge link requirements
+
+The architecture is documented before the remote link is advertised as complete. A production edge link still needs TLS/mTLS, link identity, export/import subject filters, reconnect backoff, cursor or sequence transfer, bounded offline queues, lag metrics, retry metrics, and explicit drop behavior.
+
+## Offline behavior
+
+The 0.6.0 broker can continue local traffic within its configured resource limits. It does not yet provide a complete durable reconnect session that automatically resumes an upstream cursor after restart. Applications requiring that guarantee must keep the upstream session and transfer state outside the current broker or wait for the edge-link release gate.
+
+## Operational checklist
+
+| Concern | Guidance |
+| --- | --- |
+| Network | Keep plaintext TCP inside a protected network or terminate TLS before ZigMV. |
+| Memory | Set client, subscription, payload, and mailbox limits for the gateway size. |
+| Telemetry | Use `live` for replaceable samples and expose `STATS` to a local operator. |
+| Commands | Use `durable`, consumer ACKs, expiry, and idempotent command handlers. |
+| Migration | Translate MQTT and NATS at the boundary into the canonical ZigMV envelope. |
+| Failure | Test upstream outage, local restart, slow consumer, disk pressure, and reconnect before production. |
+
+## Secure remote binding
+
+ZigMV keeps the simplest local deployment path lightweight: the default `127.0.0.1` bind can be used on a Raspberry Pi or local edge host with the native protocol. When the broker binds beyond loopback, it requires an authentication token unless the operator explicitly supplies `--allow-insecure-remote` for a controlled lab network. Production remote deployments should use an authentication token, subject ACLs, a protected metrics bind, and TLS or an authenticated transport boundary before exposure to an untrusted network.
+
+Example local edge launch:
+
+```sh
+./zigmq --protocol zigmv --host 127.0.0.1 --port 4222 \
+  --session-store /var/lib/zigmv/session.journal --metrics-port 9090
+```
+
+Example remotely reachable launch with a token file:
+
+```sh
+./zigmq --protocol zigmv --host 0.0.0.0 --port 4222 \
+  --auth-token-file /etc/zigmv/token \
+  --publish-allow 'telemetry.>' --subscribe-allow 'telemetry.>'
+```
+
+The broker remains a transport and delivery process rather than a database or inference runtime. AI applications should publish opaque telemetry, command, inference-request, and inference-result payloads through ZigMV; the consumer or worker decodes them and writes durable business data to its chosen database.
+
+## Durable journal compaction
+
+The persistent-session journal now exposes a compaction primitive that rewrites only currently pending deliveries into a caller-managed replacement file and syncs it before replacement. An edge supervisor should write the replacement beside the active journal, sync it, atomically rename it into place, and retain the old file until the replacement is verified. This keeps ACK tombstones from growing without requiring the broker to parse application payloads or hold the entire journal in memory.

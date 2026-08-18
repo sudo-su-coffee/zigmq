@@ -1,0 +1,107 @@
+---
+title: Benchmarking ZigMV
+description: Measure throughput, delivery, loss, latency, and backpressure correctly.
+---
+
+# Benchmarking ZigMV
+
+A single publisher-loop number is not a messaging benchmark. ZigMV reports the complete path:
+
+```text
+socket-written -> broker-accepted -> queued -> delivered -> consumer-ACKed
+```
+
+## Run the benchmark
+
+Build and start a ReleaseFast broker:
+
+```sh
+zig build -Doptimize=ReleaseFast
+./zig-out/bin/zigmq --protocol zigmv --port 4222
+```
+
+Strict acknowledged run:
+
+```sh
+python3 scripts/benchmark_zigmv.py \
+  --messages 1000 \
+  --payload-size 128 \
+  --drain-timeout 15 \
+  --ack-publishes \
+  --port 4222
+```
+
+At-most-once live run:
+
+```sh
+python3 scripts/benchmark_zigmv.py \
+  --messages 1000 \
+  --payload-size 128 \
+  --drain-timeout 15 \
+  --allow-live-loss \
+  --port 4222
+```
+
+The live command may return `PASS_LOSSY_LIVE` when delivery loss occurs without gaps, duplicates, or invalid frames. An ACK run returns `PASS` only when every broker-accepted message is delivered by the benchmark consumer.
+
+## Reproducible matrix runner
+
+For a bounded local matrix across payload sizes and publisher-ACK modes, run:
+
+```sh
+python3 scripts/benchmark_matrix.py \
+  --binary ./zig-out/bin/zigmq \
+  --messages 1000 \
+  --output benchmark_runs/zigmv_matrix.json
+```
+
+The runner records each case’s payload size, message count, ACK mode, return code, raw benchmark output, and broker log. Its default matrix is intentionally a smoke matrix; the full beta gate must expand publishers, subscribers, profiles, duration, failure injection, and resource measurements as described in `docs/ZIGMV_BETA_RELEASE_GATES.md`.
+
+## Metrics
+
+| Metric | Meaning |
+| --- | --- |
+| `offered_messages` | Frames the publisher attempted to write. |
+| `socket_accepted_messages` | Frames accepted by the publisher socket writer. |
+| `broker_accepted_messages` | Frames confirmed by broker ACK or synchronized STATS. |
+| `delivered_messages` | Complete frames parsed by the benchmark subscriber. |
+| `lost_messages` | Broker-accepted messages not delivered before the drain deadline. |
+| `delivery_ratio` | Delivered divided by broker-accepted messages. |
+| `duplicates`, `gaps`, `invalid_frames` | Integrity failures detected by message IDs and framing. |
+| `accepted_msg_per_sec` | Rate at which the publisher path accepted frames. |
+| `delivered_msg_per_sec` | End-to-end delivery rate over the measured drain interval. |
+| `backpressure_events` | Publisher-side socket blocking or write failure observations. |
+
+## 0.6.0 local evidence
+
+The latest repeated local ReleaseFast run used localhost TCP and a 128-byte payload:
+
+| Mode | Broker accepted | Delivered | Loss | Result |
+| --- | ---: | ---: | ---: | --- |
+| `live`, 1,000 messages | 1,000 | 994 | 6 | `PASS_LOSSY_LIVE`, 99.4% ratio |
+| `live` with broker publish ACK | 1,000 | 1,000 | 0 | `PASS`, 100% ratio |
+
+Historical local artifacts also record 23,563.4 publish-ACK messages/sec, 36,618.7 volatile stream-free publish-ACK messages/sec, 6,294.2 local-stream publish-ACK messages/sec, and 89,066.7 fan-out deliveries/sec with 50 subscribers. These values are regression evidence, not universal capacity guarantees.
+
+## Bounded soak evidence
+
+For a sustained release-evidence run, use the bounded soak harness:
+
+```sh
+python3 scripts/soak_test.py \
+  --binary ./zig-out/bin/zigmq \
+  --duration 60 \
+  --output benchmark_runs/zigmv_soak.txt
+```
+
+The pull-request workflow keeps long soak runs out of the default path; beta validation should run them in a controlled environment and record CPU, RSS, file descriptors, p50/p95/p99 latency, backpressure, and broker logs together with the output file.
+
+## Benchmark matrix
+
+Before comparing releases, run payload sizes of 16, 128, 1,024, and 65,536 bytes; one, ten, fifty, and one hundred subscribers; one, four, sixteen, and sixty-four publishers; live, ACK, work, durable, and state profiles; and cold, warm, reconnect, and sustained-soak conditions.
+
+Record the Git commit, Zig version, optimization mode, operating system, CPU, memory, payload size, publisher count, subscriber count, profile, ACK policy, duration, p50/p95/p99 latency, CPU, peak memory, accepted rate, delivered rate, delivery ratio, loss, duplicate, gap, and backpressure counts.
+
+<Note>
+The 100M messages/sec test is an offered-rate stress target. It is not an end-to-end capacity claim until a compiled multi-publisher client demonstrates complete accepted, delivered, and integrity counts.
+</Note>

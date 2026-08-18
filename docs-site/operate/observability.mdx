@@ -1,0 +1,70 @@
+---
+title: Observability
+description: Inspect broker counters and measure the native delivery path.
+---
+
+# Observability
+
+After authentication, request process-local broker counters:
+
+```text
+ZMV/1 STATS\r\n
+ZMV/1 STATS clients=3 subscriptions=2 pending=0 published=5 delivered=5 redelivered=1 acknowledged=2 expired=0\r\n
+```
+
+## Counters
+
+| Counter | Meaning |
+| --- | --- |
+| `clients` | Active client connections. |
+| `subscriptions` | Active native ZigMV subscriptions. |
+| `pending` | Connected-session durable deliveries waiting for ACK. |
+| `published` | Native ZigMV publications accepted by the broker process. |
+| `delivered` | Native deliveries enqueued for matching consumers. |
+| `redelivered` | Durable retry deliveries. |
+| `acknowledged` | Durable consumer ACKs accepted. |
+| `expired` | Pending durable messages removed after expiry. |
+
+Counters reset on process restart and are not a distributed metrics system. Use them to reconcile a local benchmark and detect whether a publisher reached the broker before its socket closed.
+
+## Prometheus endpoint
+
+Start an optional local HTTP listener for Prometheus scraping and service health checks:
+
+```sh
+./zig-out/bin/zigmq --protocol zigmv --metrics-port 9090
+curl -fsS http://127.0.0.1:9090/metrics
+curl -fsS http://127.0.0.1:9090/health
+curl -fsS http://127.0.0.1:9090/readyz
+```
+
+The endpoint emits Prometheus text exposition with stable, low-cardinality names. It snapshots counters under the broker mutex and formats the response outside the publication and delivery loops; it does not add per-message metric allocations or client, subject, token, request-ID, or session-ID labels.
+
+```yaml
+scrape_configs:
+  - job_name: zigmv
+    static_configs:
+      - targets: ["zigmv-edge-1:9090"]
+```
+
+The initial metric contract is:
+
+| Metric | Type | Meaning |
+| --- | --- | --- |
+| `zigmv_build_info{version="..."}` | Gauge | Running ZigMV build identity. |
+| `zigmv_clients` | Gauge | Active client connections. |
+| `zigmv_subscriptions` | Gauge | Active ZigMV subscriptions. |
+| `zigmv_pending_durable` | Gauge | Pending durable deliveries. |
+| `zigmv_published_total` | Counter | Accepted publications. |
+| `zigmv_delivered_total` | Counter | Deliveries enqueued for matching subscribers. |
+| `zigmv_redelivered_total` | Counter | Durable retry deliveries. |
+| `zigmv_acknowledged_total` | Counter | Accepted durable ACKs. |
+| `zigmv_expired_total` | Counter | Expired durable deliveries. |
+
+Grafana can graph `rate(zigmv_published_total[5m])`, `rate(zigmv_delivered_total[5m])`, `zigmv_pending_durable`, and the delivery-to-publication ratio. Alerting should remain bounded-label: use queue pressure, retry growth, scrape failure, and process health rather than per-client or per-subject labels.
+
+`/health` and `/readyz` currently return `ok` while the management listener is serving; graceful-drain and dependency-aware readiness are later beta gates. The endpoints are intentionally unauthenticated in this first implementation and should be bound to loopback, a protected management network, or an authenticated reverse proxy. Do not expose them directly to an untrusted network.
+
+## What to add before 1.0.0-beta
+
+The release gates still require queue occupancy, blocked-publisher time, p50/p95/p99 latency, bytes/sec, CPU, peak memory, disk append latency, connection churn, edge-link lag, retries, and drops. These will be added as bounded metrics in later trains. The current STATS command and `/metrics` endpoint remain intentionally small so they do not add an administration protocol or per-message allocation to the native hot path.

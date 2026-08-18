@@ -27,7 +27,12 @@ jobs:
         run: zig build
 
       - name: Version metadata
-        run: ./zig-out/bin/zigmq --version 2>&1 | grep -F 'zigmq 1.0.0-beta.1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_version="$(sed -n 's/.*pub const version = "\([^"]*\)";.*/\1/p' src/root.zig)"
+          test -n "$expected_version"
+          ./zig-out/bin/zigmq --version 2>&1 | grep -F "zigmq $expected_version"
 
       - name: Generate ephemeral mTLS test certificates
         shell: bash
@@ -109,7 +114,11 @@ jobs:
         run: python3 scripts/check_docs_links.py
 
       - name: Release gate consistency
-        run: python3 scripts/release_gate_check.py --root . --expected-version 1.0.0-beta.1
+        shell: bash
+        run: |
+          expected_version="$(sed -n 's/.*pub const version = "\([^"]*\)";.*/\1/p' src/root.zig)"
+          python3 scripts/release_gate_check.py --root . --expected-version "$expected_version"
+          python3 scripts/stable_release_preflight.py --root . --expected-version "$expected_version"
 
   cross-target-builds:
     runs-on: ubuntu-latest

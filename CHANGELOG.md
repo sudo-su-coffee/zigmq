@@ -2,7 +2,14 @@
 
 All notable changes to zigmq are documented here.
 
-## [1.0.0-beta.1] - Unreleased
+## [1.0.0] - Unreleased
+
+This stable candidate carries the ZigMV 1.0.0-beta.1 implementation after final validation-gate review. It includes native TLS/mTLS, authenticated bounded edge LINK forwarding, checksummed journal recovery, deterministic fault gates, benchmark metadata, and release preflight validation.
+
+### Stable scope and non-claims
+
+The release claims bounded profile-specific delivery, native transport security, local durable recovery, and authenticated edge forwarding. It does not claim MQTT QoS 2, full MQTT 5.0 interoperability, complete NATS JetStream semantics, distributed durable replication, exactly-once delivery, or ZigMV `exact`.
+
 
 ### Added
 
@@ -20,6 +27,12 @@ All notable changes to zigmq are documented here.
 ### Known limitations
 
 - This beta candidate does not claim full MQTT 5.0 interoperability, full NATS JetStream semantics, MQTT QoS 2 parity, distributed replication, or exactly-once delivery.
+
+## [1.0.0-beta.1] - Superseded candidate
+
+### Release history
+
+- Superseded by the stable 1.0.0 candidate after final release-gate work.
 
 ## [0.6.0] - Unreleased
 

@@ -71,6 +71,32 @@
 - [x] Add real TLS/mTLS listener configuration, certificate verification, and security regression tests.
 - [ ] Do not bump to 1.0.0 or publish artifacts until edge transport and TLS/mTLS gates pass.
 
+## Stacked PR release execution
+
+- [ ] Preserve the merged main baseline and record the current working-tree changes.
+- [ ] Stack PR 1 for validation tooling, disk-full/fault coverage, benchmark metadata, and evidence collection.
+- [ ] Stack PR 2 for documentation synchronization and stable-claim/non-claim policy.
+- [ ] Stack PR 3 for final packaging, release-candidate metadata, checksums, and tag-readiness workflow.
+- [ ] Run CI and merge the stacked PRs in dependency order without creating v1.0.0 prematurely.
+
+## Consolidated v1.0.0 blocker execution
+
+- [ ] Complete the operational performance matrix and archive raw results.
+- [ ] Run and archive the one-hour soak on the final candidate commit.
+- [ ] Add or validate disk-full and broader fault-matrix behavior.
+- [ ] Resolve credential rotation and identity-to-ACL mapping as tested claims or explicit non-claims.
+- [ ] Synchronize stable-release documentation and known limitations.
+- [ ] Run final metadata, stale-claim, link, checksum, and diff validation.
+- [ ] Build final multi-target artifacts from one exact commit.
+- [ ] Run consolidated final CI and inspect every required job.
+- [ ] Prepare the approval/tag sequence without creating v1.0.0 before all gates pass.
+
+## Beta.1 to final v1.0.0 review
+
+- [x] Inspect the authoritative release gates, PR/CI state, metadata, artifacts, and working tree.
+- [x] Classify mandatory final-release work separately from post-1.0 features.
+- [x] Document exact acceptance evidence and the final tag sequence.
+
 ## Final CI and codebase audit
 
 - [ ] Verify the corrected PR main test job and cross-target jobs.

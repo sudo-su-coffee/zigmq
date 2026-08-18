@@ -71,6 +71,56 @@
 - [x] Add real TLS/mTLS listener configuration, certificate verification, and security regression tests.
 - [ ] Do not bump to 1.0.0 or publish artifacts until edge transport and TLS/mTLS gates pass.
 
+## No-stop local completion pass
+
+- [ ] Reconcile the active four-plan checklist with the current merged main and local candidate branches.
+- [ ] Complete remaining local reliability, security, benchmark, soak, resource-fault, and compatibility evidence.
+- [ ] Complete release documentation, known limitations, packaging, checksums, and reproducibility records.
+- [ ] Run the full local candidate validation and record every pass/fail result.
+- [ ] Leave only external merge/tag approval or genuinely time-based evidence as residual gates.
+
+## Four-plan v1.0.0 completion program
+
+### Plan 1 — Stabilize baseline and CI
+
+- [ ] Restore GitHub authentication and inspect PR #40.
+- [ ] Verify the merged main commit, branch topology, working tree, and release metadata.
+- [ ] Merge or correct PR #40 and run its complete CI.
+- [ ] Remove stale historical blockers from the active release checklist without deleting evidence history.
+
+### Plan 2 — Close reliability, security, and evidence gates
+
+- [ ] Finish the one-hour acknowledged soak and archive its raw result.
+- [ ] Complete the operational benchmark matrix with end-to-end counters, latency percentiles, CPU, RSS, and queue pressure.
+- [ ] Expand fault evidence for full queue, TCP reset, disconnect, retry, duplicate delivery, restart, and disk-full behavior.
+- [ ] Decide credential rotation and identity-to-ACL mapping as tested claims or explicit non-claims.
+
+### Plan 3 — Synchronize claims, docs, and packaging
+
+- [ ] Align README, changelog, protocol, operations, docs-site, known limitations, and release notes.
+- [ ] Run link, stale-claim, version, reproducibility, checksum, and diff checks.
+- [ ] Verify release workflow packages the supported target artifacts and invokes the stable preflight.
+
+### Plan 4 — Final candidate and release decision
+
+- [ ] Build final artifacts from one exact candidate commit.
+- [ ] Run final local and CI validation and inspect every job.
+- [ ] Obtain explicit release approval, create v1.0.0, and verify tag/release/artifact alignment.
+- [ ] Record any remaining post-1.0 work separately from stable-release blockers.
+
+## Complete v1.0.0 release work
+
+- [ ] Audit all code, branches, PRs, release gates, metadata, and artifacts.
+- [ ] Complete protocol, transport, edge-link, storage, resource-limit, and security implementation checks.
+- [ ] Complete unit, integration, compatibility, hostile-input, fuzz-survival, recovery, TLS/mTLS, and fault tests.
+- [ ] Complete benchmark, latency, memory, backpressure, fan-out, reconnect, and one-hour soak evidence.
+- [ ] Decide and document every stable claim and unsupported feature.
+- [ ] Synchronize README, changelog, protocol, operations, docs site, release notes, and known limitations.
+- [ ] Run documentation, stale-claim, metadata, checksum, reproducibility, and diff checks.
+- [ ] Build and verify final multi-target artifacts from one exact commit.
+- [ ] Run and inspect final CI before merging the release candidate.
+- [ ] Merge release PRs, obtain approval, create v1.0.0, and verify tag/release/artifact alignment.
+
 ## Stacked PR release execution
 
 - [ ] Preserve the merged main baseline and record the current working-tree changes.

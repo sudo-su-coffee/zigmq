@@ -1,13 +1,13 @@
 ---
 title: Guarantees and boundaries
-description: What ZigMV 0.6.0 guarantees, and what it does not claim.
+description: What ZigMV 1.0.0-beta.1 guarantees, and what it does not claim.
 ---
 
 # Guarantees and boundaries
 
 ZigMV documents delivery behavior per profile instead of using one global guarantee.
 
-## Implemented in 0.6.0
+## Implemented in 1.0.0-beta.1 candidate
 
 | Capability | Guarantee boundary |
 | --- | --- |
@@ -20,12 +20,15 @@ ZigMV documents delivery behavior per profile instead of using one global guaran
 | Resource protection | Bounded clients, subscriptions, payloads, mailboxes, and per-client publish rate limits. |
 | Observability | Process-local `STATS` counters for benchmark and operational inspection. |
 | Publish idempotency foundation | Bounded per-client duplicate numeric-ID recognition within one session. |
+| Transport security | Native TLS 1.3 transport with certificate verification and required client certificates for mTLS listeners. |
+| Edge forwarding | Authenticated LINK sessions with subject filters, cursor tracking, reconnect backoff, loop prevention, and bounded forwarding queues. |
+| Local recovery | Checksummed journal recovery, durable restart handling, and connected-session redelivery evidence. |
 
 ## Not yet claimed
 
 MQTT QoS 2 is not implemented. QoS 2 requires a complete multi-step handshake, duplicate suppression, and crash-safe state. Full NATS JetStream semantics are not implemented either; ZigMV has a durable append, ACK, replay, expiry, and connected-session retry foundation, but not complete persistent consumer cursors, durable reconnect sessions, or replicated recovery.
 
-Native TLS/mTLS, authenticated remote edge links, bounded offline transfer, reconnect cursors, durable restart recovery, and ZigMV `exact` remain release gates. The project must not advertise these as available features until their tests pass.
+Native TLS/mTLS, authenticated remote edge links, bounded offline transfer, reconnect cursors, and durable restart recovery are implemented in the current candidate and covered by runtime gates. They remain bounded/local guarantees rather than distributed replication guarantees. ZigMV `exact` remains unsupported and must not be advertised.
 
 <Warning>
 Do not use ZigMV `live` for irreversible commands. Use `durable`, require an ACK, and make the consumer operation idempotent.
